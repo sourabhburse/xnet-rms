@@ -178,6 +178,9 @@ int save_config_option(const char *section, const char *option, const char *valu
 }
 
 int main(void) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
     printf("===================================================\n");
     printf(" Niseva Cloud RMS Router Agent v%s (OpenWrt)\n", AGENT_VERSION);
     printf("===================================================\n");

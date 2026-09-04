@@ -77,12 +77,8 @@ export const DeviceList: React.FC<Props> = ({ onSelectDevice }) => {
       if (protocol === 'http') setLuciOpen(true);
       else if (protocol === 'ssh') setTerminalOpen(true);
       else if (protocol === 'sftp') setFileOpen(true);
-    } catch {
-      setActiveTunnelToken(`mock_token_${Date.now()}`);
-      setActiveDeviceName(dev.name || dev.serial_number);
-      if (protocol === 'http') setLuciOpen(true);
-      else if (protocol === 'ssh') setTerminalOpen(true);
-      else if (protocol === 'sftp') setFileOpen(true);
+    } catch (err: any) {
+      message.error(err?.response?.data?.error || 'Failed to establish tunnel');
     }
   };
 
@@ -330,9 +326,12 @@ export const DeviceList: React.FC<Props> = ({ onSelectDevice }) => {
 
       <TerminalModal
         open={terminalOpen}
-        token={activeTunnelToken || ''}
+        token={activeTunnelToken}
         deviceName={activeDeviceName}
-        onClose={() => setTerminalOpen(false)}
+        onClose={() => {
+          setTerminalOpen(false);
+          setActiveTunnelToken(null);
+        }}
       />
 
       <FileManagerModal

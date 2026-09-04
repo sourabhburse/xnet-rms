@@ -18,6 +18,8 @@ struct tunnel_bridge {
     struct uloop_fd local_fd;
     struct uloop_fd remote_fd;
     char token[64];
+    char target_host[64];
+    int target_port;
     bool active;
     bool handshake_complete;
     pid_t child_pid;
@@ -25,6 +27,9 @@ struct tunnel_bridge {
     uint8_t pending_buf[4096];
     size_t pending_len;
 };
+
+static void local_read_cb(struct uloop_fd *u, unsigned int events);
+static int connect_tcp(const char *host, int port);
 
 static struct tunnel_bridge g_active_tunnel = {0};
 static struct uloop_timeout g_tunnel_ttl_timer;
@@ -157,6 +162,21 @@ static void ws_parse_server_data(int local_fd, const uint8_t *buf, size_t len) {
             write(g_active_tunnel.remote_fd.fd, pong, 2);
         } else if (opcode == 0x01 || opcode == 0x02 || opcode == 0x00) {
             // Binary or Text data payload
+            if (!g_active_tunnel.is_pty && g_active_tunnel.local_fd.fd <= 0) {
+                printf("[TUNNEL] Reconnecting to local target %s:%d for incoming request\n",
+                       g_active_tunnel.target_host, g_active_tunnel.target_port);
+                int s = connect_tcp(g_active_tunnel.target_host, g_active_tunnel.target_port);
+                if (s > 0) {
+                    g_active_tunnel.local_fd.fd = s;
+                    g_active_tunnel.local_fd.cb = local_read_cb;
+                    uloop_fd_add(&g_active_tunnel.local_fd, ULOOP_READ);
+                    local_fd = s;
+                } else {
+                    fprintf(stderr, "[TUNNEL] Failed to reconnect to local target %s:%d\n",
+                            g_active_tunnel.target_host, g_active_tunnel.target_port);
+                }
+            }
+
             if (local_fd > 0 && payload_len > 0) {
                 if (masked) {
                     uint8_t unmasked[4096];
@@ -199,8 +219,17 @@ static void local_read_cb(struct uloop_fd *u, unsigned int events) {
         printf("[TUNNEL] Local fd error (%s). Closing tunnel.\n", strerror(errno));
         close_reverse_tunnel();
     } else {
-        printf("[TUNNEL] Local fd closed (EOF). Closing tunnel.\n");
-        close_reverse_tunnel();
+        if (g_active_tunnel.is_pty) {
+            printf("[TUNNEL] Local shell exited (EOF). Closing tunnel.\n");
+            close_reverse_tunnel();
+        } else {
+            printf("[TUNNEL] Local TCP target closed connection (keepalive/finish). Standing by for next request.\n");
+            if (g_active_tunnel.local_fd.fd > 0) {
+                uloop_fd_delete(&g_active_tunnel.local_fd);
+                close(g_active_tunnel.local_fd.fd);
+                g_active_tunnel.local_fd.fd = -1;
+            }
+        }
     }
 }
 
@@ -428,6 +457,8 @@ int open_reverse_tunnel(const char *token, const char *target_host, int target_p
     g_active_tunnel.is_pty = is_pty;
     g_active_tunnel.pending_len = 0;
     strncpy(g_active_tunnel.token, token, sizeof(g_active_tunnel.token) - 1);
+    strncpy(g_active_tunnel.target_host, target_host, sizeof(g_active_tunnel.target_host) - 1);
+    g_active_tunnel.target_port = target_port;
 
     // 5. Arm On-Demand TTL Auto-Close Watchdog
     g_tunnel_ttl_timer.cb = tunnel_ttl_expired;

@@ -74,6 +74,10 @@ func main() {
 	r.GET("/tunnel-inlet/:token", tunnel.RouterInletWS)
 	r.GET("/connect/terminal/:token", tunnel.BrowserOutletWS)
 	r.Any("/connect/luci/:token/*path", tunnel.HttpProxyHandler)
+	r.Any("/connect/luci/:token", tunnel.HttpProxyHandler)
+	r.Any("/luci-static/*path", tunnel.HttpProxyFallbackHandler)
+	r.Any("/cgi-bin/luci/*path", tunnel.HttpProxyFallbackHandler)
+	r.Any("/cgi-bin/luci", tunnel.HttpProxyFallbackHandler)
 
 	// -------------------------------------------------------------
 	// AUTHENTICATION ROUTES
@@ -242,8 +246,8 @@ func main() {
 		r.NoRoute(func(c *gin.Context) {
 			path := c.Request.URL.Path
 
-			if strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/tunnel") || strings.HasPrefix(path, "/connect") {
-				c.JSON(http.StatusNotFound, gin.H{"error": "API endpoint not found"})
+			if strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/tunnel") || strings.HasPrefix(path, "/connect") || strings.HasPrefix(path, "/luci-static") || strings.HasPrefix(path, "/cgi-bin") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "API or Proxy endpoint not found"})
 				return
 			}
 

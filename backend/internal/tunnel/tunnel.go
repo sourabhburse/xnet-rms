@@ -1,11 +1,16 @@
 package tunnel
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log"
 	"net/http"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +41,10 @@ type TunnelPair struct {
 	Active        bool
 	Mutex         sync.Mutex
 	InitialBuffer []byte
+
+	// HTTP LuCI proxy support
+	HttpLock   sync.Mutex
+	PipeWriter *io.PipeWriter
 }
 
 var (
@@ -215,7 +224,9 @@ func RouterInletWS(c *gin.Context) {
 		}
 
 		pair.Mutex.Lock()
-		if pair.BrowserConn != nil {
+		if pair.PipeWriter != nil {
+			_, _ = pair.PipeWriter.Write(msg)
+		} else if pair.BrowserConn != nil {
 			_ = pair.BrowserConn.WriteMessage(msgType, msg)
 		} else if len(pair.InitialBuffer) < 65536 {
 			pair.InitialBuffer = append(pair.InitialBuffer, msg...)
@@ -227,7 +238,12 @@ func RouterInletWS(c *gin.Context) {
 	pair.Mutex.Lock()
 	pair.Active = false
 	pair.RouterConn = nil
+	if pair.PipeWriter != nil {
+		_ = pair.PipeWriter.CloseWithError(io.EOF)
+		pair.PipeWriter = nil
+	}
 	if pair.BrowserConn != nil {
+		_ = pair.BrowserConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Router disconnected"))
 		_ = pair.BrowserConn.Close()
 		pair.BrowserConn = nil
 	}
@@ -279,23 +295,211 @@ func BrowserOutletWS(c *gin.Context) {
 		pair.Mutex.Unlock()
 	}
 
+	log.Printf("[TUNNEL] Browser disconnected from session %s\n", pair.SessionID)
+
 	pair.Mutex.Lock()
 	pair.BrowserConn = nil
+	if pair.RouterConn != nil {
+		_ = pair.RouterConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Browser disconnected"))
+		_ = pair.RouterConn.Close()
+		pair.RouterConn = nil
+	}
+	pair.Active = false
 	pair.Mutex.Unlock()
 }
 
 // HttpProxyHandler reverse-proxies LuCI HTTP traffic over the established tunnel
 func HttpProxyHandler(c *gin.Context) {
 	token := c.Param("token")
-	registryLock.RLock()
-	_, exists := activeTunnels[token]
-	registryLock.RUnlock()
+	if token == "" {
+		token, _ = c.Cookie("xnet_luci_token")
+	}
 
-	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Tunnel session not active"})
+	if token == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "LuCI session token required"})
 		return
 	}
 
-	c.Writer.Header().Set("Content-Type", "text/html")
-	io.WriteString(c.Writer, "<h3>LuCI Tunnel Connected</h3><p>Session active. Bridging to 127.0.0.1:80...</p>")
+	registryLock.RLock()
+	pair, exists := activeTunnels[token]
+	registryLock.RUnlock()
+
+	if !exists || time.Now().After(pair.ExpiresAt) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Tunnel session not active or expired"})
+		return
+	}
+
+	// Wait up to 10 seconds for router to connect if still establishing
+	for i := 0; i < 50; i++ {
+		pair.Mutex.Lock()
+		ready := pair.Active && pair.RouterConn != nil
+		pair.Mutex.Unlock()
+		if ready {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	pair.Mutex.Lock()
+	ready := pair.Active && pair.RouterConn != nil
+	pair.Mutex.Unlock()
+	if !ready {
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "Router reverse tunnel connection not established yet"})
+		return
+	}
+
+	// Set cookie so root-relative subrequests (/luci-static/*, /cgi-bin/luci/*) carry the session token
+	c.SetCookie("xnet_luci_token", token, 1800, "/", "", false, false)
+
+	// Determine target path on the router
+	targetPath := c.Param("path")
+	if targetPath == "" || targetPath == "/" {
+		targetPath = "/cgi-bin/luci"
+	}
+	if c.Request.URL.RawQuery != "" {
+		targetPath += "?" + c.Request.URL.RawQuery
+	}
+
+	// Lock mutex to serialize HTTP transactions over the single tunnel stream
+	pair.HttpLock.Lock()
+	defer pair.HttpLock.Unlock()
+
+	bodyBytes, _ := io.ReadAll(c.Request.Body)
+	outReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, "http://127.0.0.1"+targetPath, bytes.NewReader(bodyBytes))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create proxy request"})
+		return
+	}
+
+	for k, vv := range c.Request.Header {
+		if strings.EqualFold(k, "Upgrade") || strings.EqualFold(k, "Connection") || strings.EqualFold(k, "Sec-WebSocket-Key") || strings.EqualFold(k, "Sec-WebSocket-Version") {
+			continue
+		}
+		for _, v := range vv {
+			outReq.Header.Add(k, v)
+		}
+	}
+	outReq.Host = "127.0.0.1"
+	outReq.Header.Set("Host", "127.0.0.1")
+
+	var reqBuf bytes.Buffer
+	if err := outReq.Write(&reqBuf); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize proxy request"})
+		return
+	}
+
+	pr, pw := io.Pipe()
+	pair.Mutex.Lock()
+	pair.PipeWriter = pw
+	routerConn := pair.RouterConn
+	pair.Mutex.Unlock()
+
+	defer func() {
+		pair.Mutex.Lock()
+		if pair.PipeWriter == pw {
+			pair.PipeWriter = nil
+		}
+		pair.Mutex.Unlock()
+		_ = pw.Close()
+		_ = pr.Close()
+	}()
+
+	if routerConn == nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Router connection closed"})
+		return
+	}
+
+	if err := routerConn.WriteMessage(websocket.BinaryMessage, reqBuf.Bytes()); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to send request to router: " + err.Error()})
+		return
+	}
+
+	type readResult struct {
+		resp *http.Response
+		err  error
+	}
+	respCh := make(chan readResult, 1)
+	go func() {
+		resp, err := http.ReadResponse(bufio.NewReader(pr), outReq)
+		respCh <- readResult{resp: resp, err: err}
+	}()
+
+	var resp *http.Response
+	select {
+	case res := <-respCh:
+		if res.err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "Error reading response from router: " + res.err.Error()})
+			return
+		}
+		resp = res.resp
+	case <-time.After(30 * time.Second):
+		_ = pw.CloseWithError(errors.New("timeout reading response from router"))
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "Gateway timeout waiting for router response"})
+		return
+	case <-c.Request.Context().Done():
+		_ = pw.CloseWithError(c.Request.Context().Err())
+		return
+	}
+	defer resp.Body.Close()
+
+	// Strip frame-blocking headers so LuCI renders cleanly in dashboard iframe
+	resp.Header.Del("X-Frame-Options")
+	resp.Header.Del("Content-Security-Policy")
+
+	// Rewrite Location redirect headers to point back into the proxy
+	loc := resp.Header.Get("Location")
+	if loc != "" {
+		if strings.HasPrefix(loc, "/cgi-bin/luci") {
+			resp.Header.Set("Location", "/connect/luci/"+token+loc)
+		} else if strings.HasPrefix(loc, "/") {
+			resp.Header.Set("Location", "/connect/luci/"+token+loc)
+		}
+	}
+
+	// Rewrite cookie paths so session cookies apply globally to the domain
+	cookies := resp.Header.Values("Set-Cookie")
+	resp.Header.Del("Set-Cookie")
+	pathRegex := regexp.MustCompile(`(?i)path=[^;]+`)
+	for _, cookieVal := range cookies {
+		updatedCookie := pathRegex.ReplaceAllString(cookieVal, "Path=/")
+		c.Writer.Header().Add("Set-Cookie", updatedCookie)
+	}
+
+	// Write remaining headers
+	for k, vv := range resp.Header {
+		if strings.EqualFold(k, "Set-Cookie") || strings.EqualFold(k, "X-Frame-Options") || strings.EqualFold(k, "Content-Length") {
+			continue
+		}
+		for _, v := range vv {
+			c.Writer.Header().Add(k, v)
+		}
+	}
+
+	c.Writer.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(c.Writer, resp.Body)
+}
+
+// HttpProxyFallbackHandler catches root-level LuCI requests (/luci-static/*, /cgi-bin/luci/*) and proxies them
+func HttpProxyFallbackHandler(c *gin.Context) {
+	token, err := c.Cookie("xnet_luci_token")
+	if err != nil || token == "" {
+		// Fallback: check if activeTunnels has any active LuCI tunnel session
+		registryLock.RLock()
+		for tok, p := range activeTunnels {
+			if p.Protocol == models.ProtocolLuCI && p.Active && time.Now().Before(p.ExpiresAt) {
+				token = tok
+				break
+			}
+		}
+		registryLock.RUnlock()
+	}
+
+	if token == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No active LuCI session found"})
+		return
+	}
+
+	c.Params = append(c.Params, gin.Param{Key: "token", Value: token})
+	c.Params = append(c.Params, gin.Param{Key: "path", Value: c.Request.URL.Path})
+	HttpProxyHandler(c)
 }
