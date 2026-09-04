@@ -221,9 +221,15 @@ int open_reverse_tunnel(const char *token, const char *target_host, int target_p
         close_reverse_tunnel();
     }
 
+    int cloud_port = 8090;
+    char *port_ptr = strrchr(g_cfg.server_url, ':');
+    if (port_ptr && atoi(port_ptr + 1) > 0) {
+        cloud_port = atoi(port_ptr + 1);
+    }
+
     printf("[TUNNEL] Opening on-demand reverse tunnel for token %s\n", token);
     printf("[TUNNEL] Protocol: %s | Local Target: %s:%d | Cloud: %s:%d | TTL: %d seconds\n",
-           protocol, target_host, target_port, g_cfg.mqtt_host, 8080, ttl_seconds > 0 ? ttl_seconds : 1800);
+           protocol, target_host, target_port, g_cfg.mqtt_host, cloud_port, ttl_seconds > 0 ? ttl_seconds : 1800);
 
     // 1. Connect to local service (127.0.0.1:80 for LuCI or 127.0.0.1:22 for SSH/SFTP)
     int local_sock = connect_tcp(target_host, target_port);
@@ -233,9 +239,9 @@ int open_reverse_tunnel(const char *token, const char *target_host, int target_p
     }
 
     // 2. Connect outbound to cloud tunnel inlet
-    int remote_sock = connect_tcp(g_cfg.mqtt_host, 8080);
+    int remote_sock = connect_tcp(g_cfg.mqtt_host, cloud_port);
     if (remote_sock < 0) {
-        fprintf(stderr, "[TUNNEL] Failed to connect to cloud gateway %s:8080\n", g_cfg.mqtt_host);
+        fprintf(stderr, "[TUNNEL] Failed to connect to cloud gateway %s:%d\n", g_cfg.mqtt_host, cloud_port);
         close(local_sock);
         return -1;
     }
@@ -244,12 +250,12 @@ int open_reverse_tunnel(const char *token, const char *target_host, int target_p
     char handshake[512];
     snprintf(handshake, sizeof(handshake),
         "GET /tunnel-inlet/%s HTTP/1.1\r\n"
-        "Host: %s:8080\r\n"
+        "Host: %s:%d\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
         "Sec-WebSocket-Version: 13\r\n\r\n",
-        token, g_cfg.mqtt_host
+        token, g_cfg.mqtt_host, cloud_port
     );
     write(remote_sock, handshake, strlen(handshake));
 
