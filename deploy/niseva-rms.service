@@ -1,0 +1,26 @@
+[Unit]
+Description=XNET Cloud RMS Enterprise Server
+After=network.target postgresql.service mosquitto.service
+Wants=postgresql.service mosquitto.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/lib/niseva-rms
+ExecStart=/usr/local/bin/xnet-rms-server
+Restart=always
+RestartSec=5s
+
+# Environment variables
+Environment="PORT=8080"
+Environment="DATABASE_URL=postgres://rms_admin:niseva_rms_secret_2026@127.0.0.1:5432/niseva_rms?sslmode=disable"
+Environment="MQTT_BROKER=tcp://127.0.0.1:1883"
+Environment="MQTT_USER=niseva_backend"
+Environment="MQTT_PASSWORD=backend_secret_2026"
+Environment="JWT_SECRET=xnet_rms_production_secret_key_2026"
+
+# Security sandbox
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
