@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Card, Form, Input, Button, Typography, Space, Tag, message } from 'antd';
 import { LockOutlined, MailOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 
+import { login } from '../services/api';
+
 const { Title, Text } = Typography;
 
 interface Props {
@@ -11,29 +13,31 @@ interface Props {
 export const Login: React.FC<Props> = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = (values: any) => {
+  const handleLogin = async (values: any) => {
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      let role = 'ORG_ADMIN';
-      let orgName = 'Acme Solar Corp';
-
-      if (values.email.includes('niseva.com')) {
-        role = 'SUPER_ADMIN';
-        orgName = 'Niseva Global Management';
-      }
-
+    try {
+      const data = await login(values.email, values.password);
       const user = {
-        email: values.email,
-        name: values.email.split('@')[0],
-        role,
-        organization: orgName,
+        id: data.user?.id,
+        email: data.user?.email || values.email,
+        name: data.user?.first_name ? `${data.user.first_name} ${data.user.last_name || ''}`.trim() : values.email.split('@')[0],
+        role: data.user?.role || 'SUPER_ADMIN',
+        organization: 'Niseva Global Management',
       };
 
       localStorage.setItem('xnet_rms_user', JSON.stringify(user));
+      localStorage.setItem('niseva_user', JSON.stringify(user));
+      if (data.token) {
+        localStorage.setItem('niseva_token', data.token);
+        localStorage.setItem('token', data.token);
+      }
       message.success(`Welcome back, ${user.name}!`);
       onLoginSuccess(user);
-    }, 600);
+    } catch (err: any) {
+      message.error(err.response?.data?.error || 'Invalid email or password');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const quickFill = (email: string, pass: string) => {

@@ -51,90 +51,13 @@ export const DeviceList: React.FC<Props> = ({ onSelectDevice }) => {
   const loadData = () => {
     setLoading(true);
     getDevices()
-      .then((data) => setDevices(data))
-      .catch(() => {
-        setDevices([
-          {
-            id: 'dev-1',
-            serial_number: 'NSV-2S-2026-00412',
-            mac_address: '00:1A:2B:3C:4D:5E',
-            hardware_model: 'Niseva 2S',
-            name: 'Solar Site 01 Gateway',
-            imei: '868896069606673',
-            firmware_version: 'v1.0.0-lts',
-            status: 'ONLINE',
-            carrier: 'Airtel 4G',
-            rssi: 82,
-            caps: { sim_slots: 1, has_gps: false, has_rs485: false, ethernet_ports: 2, is_5g: false },
-            last_heartbeat_at: new Date().toISOString(),
-            last_ip: '10.124.50.21',
-            created_at: '2026-09-01',
-          },
-          {
-            id: 'dev-2',
-            serial_number: 'NSV-2M-2026-00819',
-            mac_address: '00:1A:2B:3C:4D:5F',
-            hardware_model: 'Niseva 2M',
-            name: 'Gujarat Grid Substation #4',
-            imei: '868896069606674',
-            firmware_version: 'v1.1.2-lts',
-            status: 'ONLINE',
-            carrier: 'Jio LTE (SIM 1 Active)',
-            rssi: 88,
-            caps: { sim_slots: 2, has_gps: false, has_rs485: true, ethernet_ports: 2, is_5g: false },
-            last_heartbeat_at: new Date().toISOString(),
-            last_ip: '10.124.50.22',
-            created_at: '2026-09-01',
-          },
-          {
-            id: 'dev-3',
-            serial_number: 'NSV-4GP-2026-0104',
-            mac_address: '00:1A:2B:3C:4D:60',
-            hardware_model: 'Niseva 4G-Pro',
-            name: 'Fleet Logistics Bus #12',
-            imei: '868896069606675',
-            firmware_version: 'v1.2.0-beta',
-            status: 'ONLINE',
-            carrier: 'Vodafone Idea 4G',
-            rssi: 74,
-            caps: { sim_slots: 2, has_gps: true, has_rs485: false, ethernet_ports: 4, is_5g: false },
-            last_heartbeat_at: new Date().toISOString(),
-            last_ip: '100.64.12.98',
-            created_at: '2026-08-28',
-          },
-          {
-            id: 'dev-4',
-            serial_number: 'NSV-5GU-2026-0002',
-            mac_address: '00:1A:2B:3C:4D:61',
-            hardware_model: 'Niseva 5G-Ultra',
-            name: 'Port Terminal CCTV Hub',
-            imei: '868896069606676',
-            firmware_version: 'v2.0.0-rc1',
-            status: 'ONLINE',
-            carrier: 'Airtel 5G Plus',
-            rssi: 96,
-            caps: { sim_slots: 2, has_gps: true, has_rs485: true, ethernet_ports: 5, is_5g: true },
-            last_heartbeat_at: new Date().toISOString(),
-            last_ip: '10.50.0.1',
-            created_at: '2026-08-25',
-          },
-          {
-            id: 'dev-5',
-            serial_number: 'NSV-2S-2026-00414',
-            mac_address: '00:1A:2B:3C:4D:62',
-            hardware_model: 'Niseva 2S',
-            name: 'Substation Inverter #3',
-            imei: '868896069606677',
-            firmware_version: 'v1.0.0-lts',
-            status: 'OFFLINE',
-            carrier: 'Airtel 4G',
-            rssi: 0,
-            caps: { sim_slots: 1, has_gps: false, has_rs485: false, ethernet_ports: 2, is_5g: false },
-            last_heartbeat_at: null,
-            last_ip: '100.64.12.99',
-            created_at: '2026-08-28',
-          },
-        ]);
+      .then((data) => {
+        setDevices(data || []);
+      })
+      .catch((err) => {
+        console.error('Failed to load devices:', err);
+        message.error('Failed to load devices from server: ' + (err.response?.data?.error || err.message));
+        setDevices([]);
       })
       .finally(() => setLoading(false));
   };

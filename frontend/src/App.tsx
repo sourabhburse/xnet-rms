@@ -26,7 +26,8 @@ const { Header, Sider, Content } = Layout;
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any>(() => {
     const saved = localStorage.getItem('xnet_rms_user');
-    return saved ? JSON.parse(saved) : null;
+    const token = localStorage.getItem('niseva_token') || localStorage.getItem('token');
+    return saved && token ? JSON.parse(saved) : null;
   });
 
   const [currentView, setCurrentView] = useState<
@@ -42,6 +43,8 @@ export const App: React.FC = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('xnet_rms_user');
+    localStorage.removeItem('niseva_user');
+    localStorage.removeItem('niseva_token');
     localStorage.removeItem('token');
     setCurrentUser(null);
     setCurrentView('dashboard');
@@ -55,7 +58,7 @@ export const App: React.FC = () => {
 
   const navItems = [
     { key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
-    { key: 'devices', icon: <CloudServerOutlined />, label: 'Routers & Gateways' },
+    { key: 'devices', icon: <CloudServerOutlined />, label: 'Devices (Routers & Gateways)' },
     { key: 'connect', icon: <ThunderboltOutlined />, label: 'RMS Connect' },
     { key: 'configs', icon: <SettingOutlined />, label: 'Config Profiles' },
     { key: 'deployments', icon: <AppstoreOutlined />, label: 'FOTA & Packages' },
@@ -201,7 +204,7 @@ export const App: React.FC = () => {
 
         {/* Content Area */}
         <Content style={{ padding: 24, margin: 0, minHeight: 280, backgroundColor: '#f4f5f7' }}>
-          {currentView === 'dashboard' && <Dashboard />}
+          {currentView === 'dashboard' && <Dashboard onSelectDevice={handleSelectDevice} />}
           {currentView === 'devices' && <DeviceList onSelectDevice={handleSelectDevice} />}
           {currentView === 'detail' && (
             <DeviceDetail deviceId={selectedDeviceId} onBack={() => setCurrentView('devices')} />
