@@ -220,12 +220,15 @@ func RouterInletWS(c *gin.Context) {
 	for {
 		msgType, msg, err := conn.ReadMessage()
 		if err != nil {
+			log.Printf("[TUNNEL-WS] Router connection read error for session %s: %v\n", pair.SessionID, err)
 			break
 		}
 
 		pair.Mutex.Lock()
-		if pair.PipeWriter != nil {
-			_, _ = pair.PipeWriter.Write(msg)
+		pw := pair.PipeWriter
+		if pw != nil {
+			log.Printf("[TUNNEL-WS] Forwarding %d bytes from router to PipeWriter\n", len(msg))
+			_, _ = pw.Write(msg)
 		} else if pair.BrowserConn != nil {
 			_ = pair.BrowserConn.WriteMessage(msgType, msg)
 		} else if len(pair.InitialBuffer) < 65536 {
@@ -414,10 +417,14 @@ func HttpProxyHandler(c *gin.Context) {
 		return
 	}
 
+	log.Printf("[HTTP-PROXY] Starting proxy request: %s %s (token=%s)\n", c.Request.Method, targetPath, token)
+
 	if err := routerConn.WriteMessage(websocket.BinaryMessage, reqBuf.Bytes()); err != nil {
+		log.Printf("[HTTP-PROXY] Error writing to routerConn: %v\n", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to send request to router: " + err.Error()})
 		return
 	}
+	log.Printf("[HTTP-PROXY] Sent %d bytes to router WebSocket for %s\n", reqBuf.Len(), targetPath)
 
 	type readResult struct {
 		resp *http.Response
@@ -433,19 +440,23 @@ func HttpProxyHandler(c *gin.Context) {
 	select {
 	case res := <-respCh:
 		if res.err != nil {
+			log.Printf("[HTTP-PROXY] ReadResponse error for %s: %v\n", targetPath, res.err)
 			c.JSON(http.StatusBadGateway, gin.H{"error": "Error reading response from router: " + res.err.Error()})
 			return
 		}
 		resp = res.resp
 	case <-time.After(30 * time.Second):
+		log.Printf("[HTTP-PROXY] Timeout waiting for router response for %s\n", targetPath)
 		_ = pw.CloseWithError(errors.New("timeout reading response from router"))
 		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "Gateway timeout waiting for router response"})
 		return
 	case <-c.Request.Context().Done():
+		log.Printf("[HTTP-PROXY] Client canceled request for %s\n", targetPath)
 		_ = pw.CloseWithError(c.Request.Context().Err())
 		return
 	}
 	defer resp.Body.Close()
+	log.Printf("[HTTP-PROXY] ReadResponse success for %s: status=%d, content-length=%d\n", targetPath, resp.StatusCode, resp.ContentLength)
 
 	// Strip frame-blocking headers so LuCI renders cleanly in dashboard iframe
 	resp.Header.Del("X-Frame-Options")
@@ -481,7 +492,8 @@ func HttpProxyHandler(c *gin.Context) {
 	}
 
 	c.Writer.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(c.Writer, resp.Body)
+	written, copyErr := io.Copy(c.Writer, resp.Body)
+	log.Printf("[HTTP-PROXY] Copied %d bytes to client for %s (err: %v)\n", written, targetPath, copyErr)
 }
 
 // HttpProxyFallbackHandler catches root-level LuCI requests (/luci-static/*, /cgi-bin/luci/*) and proxies them
