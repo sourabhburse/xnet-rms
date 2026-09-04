@@ -315,6 +315,8 @@ The installer automatically:
 
 ---
 
+---
+
 ### 7.2 Installing the Agent on a Physical OpenWrt Router
 
 ```bash
@@ -327,6 +329,20 @@ ssh root@192.168.1.1 "opkg install /tmp/niseva-agent_1.0.0-1_mips_24kc.ipk"
 # Step 3: Bind to your Tenant with Zero-Touch Token
 ssh root@192.168.1.1 "uci set niseva.general.enrollment_token='YOUR_TENANT_TOKEN' && uci commit && /etc/init.d/niseva-agent restart"
 ```
+
+---
+
+## 8. Architectural & Operational Decisions Log
+
+### Decision #14: Public VPS Hosting & Router Agent Synchronization
+- **Date:** September 4, 2026
+- **Server Deployment:** Hosted on public Contabo VPS (`82.180.146.203`) on port `8090` using PM2 (`xnet-rms`) under the `ubuntu` user, leaving existing services (`niseva-cloud-backend`, `private-watch-party`, Nginx) untouched.
+- **MQTT Broker:** Mosquitto 2.0+ listening on public `0.0.0.0:1883`. Verified end-to-end device heartbeat and telemetry ingestion.
+- **Router C Agent Synchronization:**
+  - `agent/src/agent.h`: `DEFAULT_SERVER` set to `http://82.180.146.203:8090`, `DEFAULT_MQTT_HOST` set to `82.180.146.203`, `DEFAULT_MQTT_PORT` set to `1883`.
+  - `agent/files/niseva.config`: `server_url 'http://82.180.146.203:8090'`, `mqtt_host '82.180.146.203'`, `mqtt_port '1883'`.
+  - `agent/niseva-agent_1.0.0-1_mips_24kc.ipk`: Rebuilt with updated config files.
+  - Zero-touch provision check-in (`/api/v1/provision/check-in`) verified returning public MQTT host `82.180.146.203` and port `1883`.
 
 ---
 

@@ -41,7 +41,22 @@ export const TerminalModal: React.FC<Props> = ({ open, token, deviceName, onClos
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}/connect/terminal/${token}`);
+    ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
+
+    const handleResize = () => {
+      try {
+        fitAddon.fit();
+      } catch (e) {}
+    };
+    window.addEventListener('resize', handleResize);
+
+    const fitTimer = setTimeout(() => {
+      try {
+        fitAddon.fit();
+        term.focus();
+      } catch (e) {}
+    }, 150);
 
     ws.onopen = () => {
       term.writeln('\x1b[32m[CONNECTED]\x1b[0m Pseudo-terminal session established (/bin/ash)\n');
@@ -49,7 +64,15 @@ export const TerminalModal: React.FC<Props> = ({ open, token, deviceName, onClos
     };
 
     ws.onmessage = (ev) => {
-      term.write(ev.data);
+      if (typeof ev.data === 'string') {
+        term.write(ev.data);
+      } else if (ev.data instanceof ArrayBuffer) {
+        term.write(new Uint8Array(ev.data));
+      } else if (ev.data instanceof Blob) {
+        ev.data.arrayBuffer().then((buf) => {
+          term.write(new Uint8Array(buf));
+        });
+      }
     };
 
     ws.onclose = () => {
@@ -63,6 +86,8 @@ export const TerminalModal: React.FC<Props> = ({ open, token, deviceName, onClos
     });
 
     return () => {
+      clearTimeout(fitTimer);
+      window.removeEventListener('resize', handleResize);
       ws.close();
       term.dispose();
     };
@@ -86,7 +111,11 @@ export const TerminalModal: React.FC<Props> = ({ open, token, deviceName, onClos
       footer={null}
       bodyStyle={{ height: '70vh', padding: 12, backgroundColor: '#111827' }}
     >
-      <div ref={terminalRef} style={{ width: '100%', height: '100%' }} />
+      <div
+        ref={terminalRef}
+        onClick={() => termInstance.current?.focus()}
+        style={{ width: '100%', height: '100%', cursor: 'text' }}
+      />
     </Modal>
   );
 };

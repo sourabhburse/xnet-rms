@@ -31,10 +31,11 @@ type TunnelPair struct {
 	ExpiresAt  time.Time
 
 	// Sockets
-	RouterConn  *websocket.Conn
-	BrowserConn *websocket.Conn
-	Active      bool
-	Mutex       sync.Mutex
+	RouterConn    *websocket.Conn
+	BrowserConn   *websocket.Conn
+	Active        bool
+	Mutex         sync.Mutex
+	InitialBuffer []byte
 }
 
 var (
@@ -215,7 +216,9 @@ func RouterInletWS(c *gin.Context) {
 
 		pair.Mutex.Lock()
 		if pair.BrowserConn != nil {
-			pair.BrowserConn.WriteMessage(msgType, msg)
+			_ = pair.BrowserConn.WriteMessage(msgType, msg)
+		} else if len(pair.InitialBuffer) < 65536 {
+			pair.InitialBuffer = append(pair.InitialBuffer, msg...)
 		}
 		pair.Mutex.Unlock()
 	}
@@ -223,8 +226,10 @@ func RouterInletWS(c *gin.Context) {
 	// Teardown
 	pair.Mutex.Lock()
 	pair.Active = false
+	pair.RouterConn = nil
 	if pair.BrowserConn != nil {
-		pair.BrowserConn.Close()
+		_ = pair.BrowserConn.Close()
+		pair.BrowserConn = nil
 	}
 	pair.Mutex.Unlock()
 
@@ -253,6 +258,10 @@ func BrowserOutletWS(c *gin.Context) {
 
 	pair.Mutex.Lock()
 	pair.BrowserConn = conn
+	if len(pair.InitialBuffer) > 0 {
+		_ = conn.WriteMessage(websocket.BinaryMessage, pair.InitialBuffer)
+		pair.InitialBuffer = nil
+	}
 	pair.Mutex.Unlock()
 
 	log.Printf("[TUNNEL] Browser attached to session %s\n", pair.SessionID)
@@ -265,10 +274,14 @@ func BrowserOutletWS(c *gin.Context) {
 
 		pair.Mutex.Lock()
 		if pair.RouterConn != nil {
-			pair.RouterConn.WriteMessage(msgType, msg)
+			_ = pair.RouterConn.WriteMessage(msgType, msg)
 		}
 		pair.Mutex.Unlock()
 	}
+
+	pair.Mutex.Lock()
+	pair.BrowserConn = nil
+	pair.Mutex.Unlock()
 }
 
 // HttpProxyHandler reverse-proxies LuCI HTTP traffic over the established tunnel

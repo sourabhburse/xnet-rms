@@ -8,6 +8,11 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/ioctl.h>
+#include <sys/wait.h>
+#include <termios.h>
+#include <signal.h>
+#include <errno.h>
 
 struct tunnel_bridge {
     struct uloop_fd local_fd;
@@ -15,6 +20,10 @@ struct tunnel_bridge {
     char token[64];
     bool active;
     bool handshake_complete;
+    pid_t child_pid;
+    bool is_pty;
+    uint8_t pending_buf[4096];
+    size_t pending_len;
 };
 
 static struct tunnel_bridge g_active_tunnel = {0};
@@ -39,8 +48,19 @@ void close_reverse_tunnel(void) {
         close(g_active_tunnel.remote_fd.fd);
         g_active_tunnel.remote_fd.fd = -1;
     }
+
+    if (g_active_tunnel.is_pty && g_active_tunnel.child_pid > 0) {
+        printf("[TUNNEL] Terminating child shell PID %d\n", g_active_tunnel.child_pid);
+        kill(g_active_tunnel.child_pid, SIGHUP);
+        kill(g_active_tunnel.child_pid, SIGTERM);
+        waitpid(g_active_tunnel.child_pid, NULL, WNOHANG);
+        g_active_tunnel.child_pid = 0;
+        g_active_tunnel.is_pty = false;
+    }
+
     g_active_tunnel.active = false;
     g_active_tunnel.handshake_complete = false;
+    g_active_tunnel.pending_len = 0;
     printf("[TUNNEL] Reverse tunnel session terminated on router.\n");
 }
 
@@ -159,10 +179,27 @@ static void local_read_cb(struct uloop_fd *u, unsigned int events) {
     (void)events;
     uint8_t buf[4096];
     ssize_t n = read(u->fd, buf, sizeof(buf));
-    if (n > 0 && g_active_tunnel.remote_fd.fd > 0 && g_active_tunnel.handshake_complete) {
-        // Frame local data into WebSocket binary frame (0x02)
-        ws_send_frame(g_active_tunnel.remote_fd.fd, buf, (size_t)n, 0x02);
-    } else if (n <= 0) {
+    if (n > 0) {
+        if (g_active_tunnel.remote_fd.fd > 0 && g_active_tunnel.handshake_complete) {
+            // Frame local data into WebSocket binary frame (0x02)
+            ws_send_frame(g_active_tunnel.remote_fd.fd, buf, (size_t)n, 0x02);
+        } else if (g_active_tunnel.remote_fd.fd > 0 && !g_active_tunnel.handshake_complete) {
+            // Buffer early output until cloud handshake completes
+            size_t available = sizeof(g_active_tunnel.pending_buf) - g_active_tunnel.pending_len;
+            size_t to_copy = (size_t)n < available ? (size_t)n : available;
+            if (to_copy > 0) {
+                memcpy(g_active_tunnel.pending_buf + g_active_tunnel.pending_len, buf, to_copy);
+                g_active_tunnel.pending_len += to_copy;
+            }
+        }
+    } else if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+            return;
+        }
+        printf("[TUNNEL] Local fd error (%s). Closing tunnel.\n", strerror(errno));
+        close_reverse_tunnel();
+    } else {
+        printf("[TUNNEL] Local fd closed (EOF). Closing tunnel.\n");
         close_reverse_tunnel();
     }
 }
@@ -172,6 +209,9 @@ static void remote_read_cb(struct uloop_fd *u, unsigned int events) {
     uint8_t buf[4096];
     ssize_t n = read(u->fd, buf, sizeof(buf));
     if (n <= 0) {
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+            return;
+        }
         close_reverse_tunnel();
         return;
     }
@@ -183,6 +223,13 @@ static void remote_read_cb(struct uloop_fd *u, unsigned int events) {
         if (end_of_header) {
             g_active_tunnel.handshake_complete = true;
             printf("[TUNNEL] ✅ WebSocket handshake confirmed (HTTP 101 Switching Protocols).\n");
+
+            // Flush any buffered pending local data
+            if (g_active_tunnel.pending_len > 0) {
+                ws_send_frame(g_active_tunnel.remote_fd.fd, g_active_tunnel.pending_buf, g_active_tunnel.pending_len, 0x02);
+                g_active_tunnel.pending_len = 0;
+            }
+
             size_t header_len = (size_t)(end_of_header + 4 - (char *)buf);
             if ((size_t)n > header_len) {
                 // Forward any trailing data frame
@@ -216,6 +263,93 @@ static int connect_tcp(const char *host, int port) {
     return s;
 }
 
+static int spawn_pty_shell(pid_t *out_pid) {
+    int master_fd = posix_openpt(O_RDWR | O_NOCTTY);
+    if (master_fd < 0) {
+        fprintf(stderr, "[TUNNEL] posix_openpt failed: %s\n", strerror(errno));
+        return -1;
+    }
+
+    if (grantpt(master_fd) != 0) {
+        fprintf(stderr, "[TUNNEL] grantpt failed: %s\n", strerror(errno));
+        close(master_fd);
+        return -1;
+    }
+
+    if (unlockpt(master_fd) != 0) {
+        fprintf(stderr, "[TUNNEL] unlockpt failed: %s\n", strerror(errno));
+        close(master_fd);
+        return -1;
+    }
+
+    char *pts_name = ptsname(master_fd);
+    if (!pts_name) {
+        fprintf(stderr, "[TUNNEL] ptsname failed: %s\n", strerror(errno));
+        close(master_fd);
+        return -1;
+    }
+
+    struct winsize ws;
+    memset(&ws, 0, sizeof(ws));
+    ws.ws_col = 120;
+    ws.ws_row = 30;
+    ioctl(master_fd, TIOCSWINSZ, &ws);
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "[TUNNEL] fork failed: %s\n", strerror(errno));
+        close(master_fd);
+        return -1;
+    }
+
+    if (pid == 0) {
+        // In child process
+        close(master_fd);
+        setsid();
+
+        int slave_fd = open(pts_name, O_RDWR);
+        if (slave_fd < 0) {
+            _exit(1);
+        }
+
+#ifdef TIOCSCTTY
+        ioctl(slave_fd, TIOCSCTTY, 0);
+#endif
+
+        dup2(slave_fd, STDIN_FILENO);
+        dup2(slave_fd, STDOUT_FILENO);
+        dup2(slave_fd, STDERR_FILENO);
+        if (slave_fd > STDERR_FILENO) {
+            close(slave_fd);
+        }
+
+        if (g_active_tunnel.remote_fd.fd > 0) {
+            close(g_active_tunnel.remote_fd.fd);
+        }
+
+        setenv("TERM", "xterm-256color", 1);
+        setenv("HOME", "/root", 1);
+        setenv("USER", "root", 1);
+        setenv("SHELL", "/bin/ash", 1);
+        setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin", 1);
+        if (chdir("/root") != 0) {
+            chdir("/");
+        }
+
+        execl("/bin/ash", "-ash", (char *)NULL);
+        execl("/bin/ash", "ash", "-l", (char *)NULL);
+        execl("/bin/sh", "-sh", (char *)NULL);
+        _exit(1);
+    }
+
+    *out_pid = pid;
+
+    int flags = fcntl(master_fd, F_GETFL, 0);
+    fcntl(master_fd, F_SETFL, flags | O_NONBLOCK);
+
+    return master_fd;
+}
+
 int open_reverse_tunnel(const char *token, const char *target_host, int target_port, const char *protocol, int ttl_seconds) {
     if (g_active_tunnel.active) {
         close_reverse_tunnel();
@@ -227,15 +361,31 @@ int open_reverse_tunnel(const char *token, const char *target_host, int target_p
         cloud_port = atoi(port_ptr + 1);
     }
 
-    printf("[TUNNEL] Opening on-demand reverse tunnel for token %s\n", token);
-    printf("[TUNNEL] Protocol: %s | Local Target: %s:%d | Cloud: %s:%d | TTL: %d seconds\n",
-           protocol, target_host, target_port, g_cfg.mqtt_host, cloud_port, ttl_seconds > 0 ? ttl_seconds : 1800);
+    bool is_pty = (strcmp(protocol, "TERMINAL_SSH") == 0 ||
+                   strcmp(protocol, "TERMINAL") == 0 ||
+                   strcmp(protocol, "SHELL") == 0);
 
-    // 1. Connect to local service (127.0.0.1:80 for LuCI or 127.0.0.1:22 for SSH/SFTP)
-    int local_sock = connect_tcp(target_host, target_port);
-    if (local_sock < 0) {
-        fprintf(stderr, "[TUNNEL] Failed to connect to local target %s:%d\n", target_host, target_port);
-        return -1;
+    printf("[TUNNEL] Opening on-demand reverse tunnel for token %s\n", token);
+    printf("[TUNNEL] Protocol: %s (PTY=%s) | Target: %s:%d | Cloud: %s:%d | TTL: %d seconds\n",
+           protocol, is_pty ? "YES" : "NO", target_host, target_port, g_cfg.mqtt_host, cloud_port, ttl_seconds > 0 ? ttl_seconds : 1800);
+
+    // 1. Connect or spawn local target
+    int local_sock = -1;
+    pid_t child_pid = 0;
+
+    if (is_pty) {
+        local_sock = spawn_pty_shell(&child_pid);
+        if (local_sock < 0) {
+            fprintf(stderr, "[TUNNEL] Failed to spawn pseudo-terminal shell\n");
+            return -1;
+        }
+        printf("[TUNNEL] ✅ PTY shell spawned (PID %d)\n", child_pid);
+    } else {
+        local_sock = connect_tcp(target_host, target_port);
+        if (local_sock < 0) {
+            fprintf(stderr, "[TUNNEL] Failed to connect to local target %s:%d\n", target_host, target_port);
+            return -1;
+        }
     }
 
     // 2. Connect outbound to cloud tunnel inlet
@@ -243,6 +393,10 @@ int open_reverse_tunnel(const char *token, const char *target_host, int target_p
     if (remote_sock < 0) {
         fprintf(stderr, "[TUNNEL] Failed to connect to cloud gateway %s:%d\n", g_cfg.mqtt_host, cloud_port);
         close(local_sock);
+        if (is_pty && child_pid > 0) {
+            kill(child_pid, SIGTERM);
+            waitpid(child_pid, NULL, WNOHANG);
+        }
         return -1;
     }
 
@@ -270,6 +424,9 @@ int open_reverse_tunnel(const char *token, const char *target_host, int target_p
 
     g_active_tunnel.active = true;
     g_active_tunnel.handshake_complete = false;
+    g_active_tunnel.child_pid = child_pid;
+    g_active_tunnel.is_pty = is_pty;
+    g_active_tunnel.pending_len = 0;
     strncpy(g_active_tunnel.token, token, sizeof(g_active_tunnel.token) - 1);
 
     // 5. Arm On-Demand TTL Auto-Close Watchdog
