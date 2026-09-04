@@ -78,8 +78,32 @@ export interface DashboardSummary {
   total_devices: number;
   online_devices: number;
   offline_devices: number;
+  pending_devices?: number;
   active_tunnels: number;
   data_usage_gb: number;
+}
+
+export interface Incident {
+  id: string;
+  rule_name: string;
+  severity: 'CRITICAL' | 'WARNING' | 'INFO';
+  device_name: string;
+  serial_number: string;
+  status: 'ACTIVE' | 'ACKNOWLEDGED' | 'RESOLVED';
+  message: string;
+  triggered_at: string;
+  resolved_at?: string;
+}
+
+export interface AuditLog {
+  id: string;
+  user_email: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  details: string;
+  ip_address: string;
+  created_at: string;
 }
 
 export const login = async (email: string, password: string) => {
@@ -136,6 +160,16 @@ export const requestTunnel = async (
     protocol,
     target_port: targetPort,
   });
+  return res.data;
+};
+
+export const getIncidents = async (): Promise<Incident[]> => {
+  const res = await api.get('/alerts/incidents');
+  return res.data;
+};
+
+export const getAuditLogs = async (): Promise<AuditLog[]> => {
+  const res = await api.get('/audit-logs');
   return res.data;
 };
 
