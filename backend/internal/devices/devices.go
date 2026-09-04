@@ -472,8 +472,8 @@ func RouterCheckIn(c *gin.Context) {
 		return
 	}
 
-	// If claimed and pending credentials delivery
-	if device.OrganizationID != nil && device.Status == models.DeviceStatusPending {
+	// If claimed and part of an organization, provision / refresh credentials
+	if device.OrganizationID != nil {
 		rawToken, tokenHash, _ := GenerateSecureToken()
 		device.TokenHash = tokenHash
 		device.Status = models.DeviceStatusOnline
