@@ -176,8 +176,13 @@ func main() {
 				return
 			}
 
+			userRole := c.GetString("role")
 			var device models.Device
-			if err := database.DB.Where("id = ? AND organization_id = ?", deviceID, orgID).First(&device).Error; err != nil {
+			query := database.DB.Where("id = ?", deviceID)
+			if userRole != "SUPER_ADMIN" && orgID != "" {
+				query = query.Where("organization_id = ?", orgID)
+			}
+			if err := query.First(&device).Error; err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Device not found"})
 				return
 			}

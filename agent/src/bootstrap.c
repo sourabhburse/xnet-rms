@@ -167,7 +167,7 @@ int perform_provision_checkin(void) {
 
     char cmd[1024];
     snprintf(cmd, sizeof(cmd),
-             "uclient-fetch --post-data='%s' --header='Content-Type: application/json' -O - '%s/api/v1/provision/check-in' 2>/dev/null",
+             "uclient-fetch -q -O - --post-data='%s' '%s/api/v1/provision/check-in' 2>/dev/null",
              json_body, g_cfg.server_url);
     free(json_body);
 

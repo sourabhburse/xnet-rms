@@ -184,10 +184,14 @@ func ListDevices(c *gin.Context) {
 	}
 
 	orgID := c.GetString("organization_id")
+	userRole := c.GetString("role")
 	var devices []models.Device
 
-	query := database.DB.Where("organization_id = ?", orgID)
-	if status := c.Query("status"); status != "" {
+	query := database.DB.Model(&models.Device{})
+	if userRole != "SUPER_ADMIN" && orgID != "" {
+		query = query.Where("organization_id = ?", orgID)
+	}
+	if status := c.Query("status"); status != "" && status != "ALL" {
 		query = query.Where("status = ?", status)
 	}
 	if groupID := c.Query("group_id"); groupID != "" {
@@ -199,21 +203,112 @@ func ListDevices(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, devices)
+	var result []gin.H
+	for _, dev := range devices {
+		var latest models.TelemetryRecord
+		_ = database.DB.Where("device_id = ?", dev.ID).Order("timestamp desc").First(&latest).Error
+
+		d := gin.H{
+			"id":                dev.ID,
+			"serial_number":     dev.SerialNumber,
+			"mac_address":       dev.MACAddress,
+			"name":              dev.Name,
+			"hardware_model":    dev.Model,
+			"model":             dev.Model,
+			"imei":              dev.IMEI,
+			"firmware_version":  dev.FirmwareVersion,
+			"status":            dev.Status,
+			"last_ip":           dev.LastIP,
+			"ip_address":        dev.LastIP,
+			"organization_id":   dev.OrganizationID,
+			"group_id":          dev.GroupID,
+			"last_heartbeat_at": dev.LastHeartbeatAt,
+			"created_at":        dev.CreatedAt,
+			"updated_at":        dev.UpdatedAt,
+			"cellular_rssi":     latest.RSSI,
+			"rssi":              latest.RSSI,
+			"cellular_rsrp":     latest.RSRP,
+			"cellular_rsrq":     latest.RSRQ,
+			"cellular_sinr":     latest.SINR,
+			"cellular_carrier":  latest.Carrier,
+			"carrier":           latest.Carrier,
+			"cpu_load":          latest.CPULoad,
+			"ram_used_mb":       latest.RAMUsedMB,
+			"ram_total_mb":      latest.RAMTotalMB,
+			"flash_free_mb":     latest.FlashFreeMB,
+			"uptime_seconds":    latest.UptimeSeconds,
+			"caps": gin.H{
+				"sim_slots":      1,
+				"has_gps":        false,
+				"has_rs485":      false,
+				"has_wifi_5g":    false,
+				"ethernet_ports": 2,
+				"is_5g":          false,
+			},
+		}
+		result = append(result, d)
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // GetDevice returns details of a single device
 func GetDevice(c *gin.Context) {
 	orgID := c.GetString("organization_id")
+	userRole := c.GetString("role")
 	deviceID := c.Param("id")
 
 	var device models.Device
-	if err := database.DB.Where("id = ? AND organization_id = ?", deviceID, orgID).First(&device).Error; err != nil {
+	query := database.DB.Where("id = ?", deviceID)
+	if userRole != "SUPER_ADMIN" && orgID != "" {
+		query = query.Where("organization_id = ?", orgID)
+	}
+	if err := query.First(&device).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Device not found"})
 		return
 	}
 
-	c.JSON(http.StatusOK, device)
+	var latest models.TelemetryRecord
+	_ = database.DB.Where("device_id = ?", device.ID).Order("timestamp desc").First(&latest).Error
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":                device.ID,
+		"serial_number":     device.SerialNumber,
+		"mac_address":       device.MACAddress,
+		"name":              device.Name,
+		"hardware_model":    device.Model,
+		"model":             device.Model,
+		"imei":              device.IMEI,
+		"firmware_version":  device.FirmwareVersion,
+		"status":            device.Status,
+		"last_ip":           device.LastIP,
+		"ip_address":        device.LastIP,
+		"organization_id":   device.OrganizationID,
+		"group_id":          device.GroupID,
+		"last_heartbeat_at": device.LastHeartbeatAt,
+		"created_at":        device.CreatedAt,
+		"updated_at":        device.UpdatedAt,
+		"cellular_rssi":     latest.RSSI,
+		"rssi":              latest.RSSI,
+		"cellular_rsrp":     latest.RSRP,
+		"cellular_rsrq":     latest.RSRQ,
+		"cellular_sinr":     latest.SINR,
+		"cellular_carrier":  latest.Carrier,
+		"carrier":           latest.Carrier,
+		"cpu_load":          latest.CPULoad,
+		"ram_used_mb":       latest.RAMUsedMB,
+		"ram_total_mb":      latest.RAMTotalMB,
+		"flash_free_mb":     latest.FlashFreeMB,
+		"uptime_seconds":    latest.UptimeSeconds,
+		"caps": gin.H{
+			"sim_slots":      1,
+			"has_gps":        false,
+			"has_rs485":      false,
+			"has_wifi_5g":    false,
+			"ethernet_ports": 2,
+			"is_5g":          false,
+		},
+	})
 }
 
 // ClaimDevice binds an unclaimed physical router to the customer's organization

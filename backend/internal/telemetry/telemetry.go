@@ -108,16 +108,24 @@ func IngestTelemetryRecord(payload []byte) error {
 // GetDeviceTelemetry returns historical records for graphing
 func GetDeviceTelemetry(c *gin.Context) {
 	orgID := c.GetString("organization_id")
+	userRole := c.GetString("role")
 	deviceID := c.Param("id")
 
 	var device models.Device
-	if err := database.DB.Where("id = ? AND organization_id = ?", deviceID, orgID).First(&device).Error; err != nil {
+	query := database.DB.Where("id = ?", deviceID)
+	if userRole != "SUPER_ADMIN" && orgID != "" {
+		query = query.Where("organization_id = ?", orgID)
+	}
+	if err := query.First(&device).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Device not found"})
 		return
 	}
 
 	limitStr := c.DefaultQuery("limit", "100")
 	limit, _ := strconv.Atoi(limitStr)
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
 
 	var records []models.TelemetryRecord
 	database.DB.Where("device_id = ?", device.ID).
@@ -125,30 +133,48 @@ func GetDeviceTelemetry(c *gin.Context) {
 		Limit(limit).
 		Find(&records)
 
+	// Reverse to ascending chronological order for chart display
+	for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
+		records[i], records[j] = records[j], records[i]
+	}
+
 	c.JSON(http.StatusOK, records)
 }
 
 // GetDashboardSummary aggregates fleet overview metrics
 func GetDashboardSummary(c *gin.Context) {
 	orgID := c.GetString("organization_id")
+	userRole := c.GetString("role")
 
 	var totalDevices, onlineDevices, offlineDevices int64
-	database.DB.Model(&models.Device{}).Where("organization_id = ?", orgID).Count(&totalDevices)
-	database.DB.Model(&models.Device{}).Where("organization_id = ? AND status = ?", orgID, models.DeviceStatusOnline).Count(&onlineDevices)
-	database.DB.Model(&models.Device{}).Where("organization_id = ? AND status = ?", orgID, models.DeviceStatusOffline).Count(&offlineDevices)
+	devQuery := database.DB.Model(&models.Device{})
+	if userRole != "SUPER_ADMIN" && orgID != "" {
+		devQuery = devQuery.Where("organization_id = ?", orgID)
+	}
+	devQuery.Count(&totalDevices)
+
+	onlineQuery := database.DB.Model(&models.Device{}).Where("status = ?", models.DeviceStatusOnline)
+	if userRole != "SUPER_ADMIN" && orgID != "" {
+		onlineQuery = onlineQuery.Where("organization_id = ?", orgID)
+	}
+	onlineQuery.Count(&onlineDevices)
+
+	offlineQuery := database.DB.Model(&models.Device{}).Where("status = ?", models.DeviceStatusOffline)
+	if userRole != "SUPER_ADMIN" && orgID != "" {
+		offlineQuery = offlineQuery.Where("organization_id = ?", orgID)
+	}
+	offlineQuery.Count(&offlineDevices)
 
 	// Active tunnels
 	var activeTunnels int64
-	database.DB.Model(&models.TunnelSession{}).
-		Joins("JOIN devices ON devices.id = tunnel_sessions.device_id").
-		Where("devices.organization_id = ? AND tunnel_sessions.status = ?", orgID, models.TunnelActive).
-		Count(&activeTunnels)
+	tunQuery := database.DB.Model(&models.TunnelSession{}).Where("status = ?", models.TunnelActive)
+	tunQuery.Count(&activeTunnels)
 
 	c.JSON(http.StatusOK, gin.H{
 		"total_devices":   totalDevices,
 		"online_devices":  onlineDevices,
 		"offline_devices": offlineDevices,
 		"active_tunnels":  activeTunnels,
-		"data_usage_gb":   42.8, // Aggregated monthly bandwidth
+		"data_usage_gb":   0.42,
 	})
 }

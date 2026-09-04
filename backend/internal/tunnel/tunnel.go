@@ -14,6 +14,7 @@ import (
 
 	"niseva-rms/backend/internal/database"
 	"niseva-rms/backend/internal/models"
+	"niseva-rms/backend/internal/mqtt"
 )
 
 var upgrader = websocket.Upgrader{
@@ -103,8 +104,13 @@ func RequestTunnel(c *gin.Context) {
 		return
 	}
 
+	userRole := c.GetString("role")
 	var device models.Device
-	if err := database.DB.Where("id = ? AND organization_id = ?", req.DeviceID, orgID).First(&device).Error; err != nil {
+	query := database.DB.Where("id = ?", req.DeviceID)
+	if userRole != "SUPER_ADMIN" && orgID != "" {
+		query = query.Where("organization_id = ?", orgID)
+	}
+	if err := query.First(&device).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Device not found"})
 		return
 	}
@@ -152,6 +158,15 @@ func RequestTunnel(c *gin.Context) {
 	registryLock.Lock()
 	activeTunnels[token] = pair
 	registryLock.Unlock()
+
+	// Dispatch open_tunnel command to router via MQTT broker
+	_ = mqtt.DispatchCommand(device.SerialNumber, "open_tunnel", map[string]interface{}{
+		"token":       token,
+		"protocol":    string(req.Protocol),
+		"target_host": req.TargetHost,
+		"target_port": req.TargetPort,
+		"ttl_seconds": 900,
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"session_id":  session.ID,

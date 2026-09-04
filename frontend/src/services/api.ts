@@ -18,13 +18,47 @@ export interface Device {
   serial_number: string;
   mac_address: string;
   model: string;
+  hardware_model?: string;
   name: string;
-  imei: string;
-  firmware_version: string;
+  imei?: string;
+  firmware_version?: string;
   status: 'ONLINE' | 'OFFLINE' | 'PENDING_PROVISION' | 'UNCLAIMED' | 'REBOOTING';
   last_heartbeat_at: string | null;
   last_ip: string;
   created_at: string;
+  updated_at?: string;
+  rssi?: number;
+  cellular_rssi?: number;
+  rsrp?: number;
+  cellular_rsrp?: number;
+  cellular_sinr?: number;
+  cellular_rsrq?: number;
+  carrier?: string;
+  cellular_carrier?: string;
+  cpu_load?: number;
+  ram_used_mb?: number;
+  ram_total_mb?: number;
+  flash_free_mb?: number;
+  uptime_seconds?: number;
+}
+
+export interface TelemetryRecord {
+  id: number;
+  device_id: string;
+  timestamp: string;
+  rssi?: number;
+  rsrp?: number;
+  rsrq?: number;
+  sinr?: number;
+  carrier?: string;
+  net_type?: string;
+  uptime_seconds?: number;
+  cpu_load?: number;
+  ram_used_mb?: number;
+  ram_total_mb?: number;
+  flash_free_mb?: number;
+  rx_bytes?: number;
+  tx_bytes?: number;
 }
 
 export interface DashboardSummary {
@@ -56,6 +90,11 @@ export const getDevices = async (): Promise<Device[]> => {
 
 export const getDevice = async (id: string): Promise<Device> => {
   const res = await api.get(`/devices/${id}`);
+  return res.data;
+};
+
+export const getDeviceTelemetry = async (id: string, limit = 50): Promise<TelemetryRecord[]> => {
+  const res = await api.get(`/devices/${id}/telemetry?limit=${limit}`);
   return res.data;
 };
 
