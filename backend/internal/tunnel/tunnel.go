@@ -389,6 +389,8 @@ func HttpProxyHandler(c *gin.Context) {
 	}
 	outReq.Host = "127.0.0.1"
 	outReq.Header.Set("Host", "127.0.0.1")
+	outReq.Close = true
+	outReq.Header.Set("Connection", "close")
 
 	var reqBuf bytes.Buffer
 	if err := outReq.Write(&reqBuf); err != nil {

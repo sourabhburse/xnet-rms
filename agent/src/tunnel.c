@@ -13,6 +13,7 @@
 #include <termios.h>
 #include <signal.h>
 #include <errno.h>
+#include <poll.h>
 
 struct tunnel_bridge {
     struct uloop_fd local_fd;
@@ -69,27 +70,50 @@ void close_reverse_tunnel(void) {
     printf("[TUNNEL] Reverse tunnel session terminated on router.\n");
 }
 
+static ssize_t write_all(int fd, const void *buf, size_t count) {
+    size_t total = 0;
+    const uint8_t *p = (const uint8_t *)buf;
+    while (total < count) {
+        ssize_t n = write(fd, p + total, count - total);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                struct pollfd pfd = {.fd = fd, .events = POLLOUT};
+                poll(&pfd, 1, 100);
+                continue;
+            }
+            return -1;
+        }
+        if (n == 0) return total;
+        total += n;
+    }
+    return total;
+}
+
 // RFC 6455 Client-to-Server Masked WebSocket Frame Transmitter
 static void ws_send_frame(int fd, const uint8_t *data, size_t len, uint8_t opcode) {
     if (fd <= 0 || len == 0) return;
 
-    uint8_t header[10];
-    size_t header_len = 0;
+    // Buffer for frame header (up to 10 bytes) + payload
+    uint8_t frame[10 + 8192];
+    if (len > 8192) {
+        len = 8192;
+    }
+
+    size_t hdr_size = 0;
 
     // Byte 0: FIN = 1 (0x80) | Opcode
-    header[0] = 0x80 | (opcode & 0x0F);
+    frame[0] = 0x80 | (opcode & 0x0F);
 
     // Byte 1+: Client frames MUST be masked (0x80 | length)
     if (len <= 125) {
-        header[1] = 0x80 | (uint8_t)len;
-        header_len = 2;
+        frame[1] = 0x80 | (uint8_t)len;
+        hdr_size = 2;
     } else if (len <= 65535) {
-        header[1] = 0x80 | 126;
-        header[2] = (uint8_t)((len >> 8) & 0xFF);
-        header[3] = (uint8_t)(len & 0xFF);
-        header_len = 4;
-    } else {
-        return; // Buffer size capped at 4096
+        frame[1] = 0x80 | 126;
+        frame[2] = (uint8_t)((len >> 8) & 0xFF);
+        frame[3] = (uint8_t)(len & 0xFF);
+        hdr_size = 4;
     }
 
     // 4-byte random masking key
@@ -99,19 +123,16 @@ static void ws_send_frame(int fd, const uint8_t *data, size_t len, uint8_t opcod
     mask[2] = (uint8_t)rand();
     mask[3] = (uint8_t)rand();
 
-    memcpy(header + header_len, mask, 4);
-    header_len += 4;
+    memcpy(frame + hdr_size, mask, 4);
+    hdr_size += 4;
 
-    // Send header
-    write(fd, header, header_len);
-
-    // Mask payload and send
-    uint8_t masked_payload[4096];
-    size_t send_len = len > sizeof(masked_payload) ? sizeof(masked_payload) : len;
-    for (size_t i = 0; i < send_len; i++) {
-        masked_payload[i] = data[i] ^ mask[i % 4];
+    // Mask payload directly into single contiguous frame buffer
+    for (size_t i = 0; i < len; i++) {
+        frame[hdr_size + i] = data[i] ^ mask[i % 4];
     }
-    write(fd, masked_payload, send_len);
+
+    // Send the complete frame atomically
+    write_all(fd, frame, hdr_size + len);
 }
 
 // RFC 6455 Server-to-Client WebSocket Frame Parser
@@ -183,9 +204,9 @@ static void ws_parse_server_data(int local_fd, const uint8_t *buf, size_t len) {
                     for (size_t i = 0; i < payload_len && i < sizeof(unmasked); i++) {
                         unmasked[i] = payload[i] ^ mask[i % 4];
                     }
-                    write(local_fd, unmasked, payload_len);
+                    write_all(local_fd, unmasked, payload_len);
                 } else {
-                    write(local_fd, payload, payload_len);
+                    write_all(local_fd, payload, payload_len);
                 }
             }
         }
