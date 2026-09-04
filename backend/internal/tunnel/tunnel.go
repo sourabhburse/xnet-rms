@@ -483,9 +483,15 @@ func HttpProxyHandler(c *gin.Context) {
 		c.Writer.Header().Add("Set-Cookie", updatedCookie)
 	}
 
-	// Write remaining headers
+	// Write remaining headers (stripping hop-by-hop headers)
 	for k, vv := range resp.Header {
-		if strings.EqualFold(k, "Set-Cookie") || strings.EqualFold(k, "X-Frame-Options") || strings.EqualFold(k, "Content-Length") {
+		if strings.EqualFold(k, "Set-Cookie") ||
+			strings.EqualFold(k, "X-Frame-Options") ||
+			strings.EqualFold(k, "Content-Length") ||
+			strings.EqualFold(k, "Transfer-Encoding") ||
+			strings.EqualFold(k, "Connection") ||
+			strings.EqualFold(k, "Keep-Alive") ||
+			strings.EqualFold(k, "Upgrade") {
 			continue
 		}
 		for _, v := range vv {
