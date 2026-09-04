@@ -352,9 +352,14 @@ func HttpProxyHandler(c *gin.Context) {
 	c.SetCookie("xnet_luci_token", token, 1800, "/", "", false, false)
 
 	// Determine target path on the router
-	targetPath := c.Param("path")
-	if targetPath == "" || targetPath == "/" {
-		targetPath = "/cgi-bin/luci"
+	var targetPath string
+	if strings.HasPrefix(c.Request.URL.Path, "/connect/luci/"+token) {
+		targetPath = strings.TrimPrefix(c.Request.URL.Path, "/connect/luci/"+token)
+		if targetPath == "" || targetPath == "/" {
+			targetPath = "/cgi-bin/luci"
+		}
+	} else {
+		targetPath = c.Request.URL.Path
 	}
 	if c.Request.URL.RawQuery != "" {
 		targetPath += "?" + c.Request.URL.RawQuery
@@ -499,7 +504,6 @@ func HttpProxyFallbackHandler(c *gin.Context) {
 		return
 	}
 
-	c.Params = append(c.Params, gin.Param{Key: "token", Value: token})
-	c.Params = append(c.Params, gin.Param{Key: "path", Value: c.Request.URL.Path})
+	c.Params = gin.Params{gin.Param{Key: "token", Value: token}}
 	HttpProxyHandler(c)
 }
