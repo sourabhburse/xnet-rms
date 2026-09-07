@@ -1,0 +1,177 @@
+<style>
+  .niseva-rms-status-card {
+    margin: 0 0 18px;
+    border: 1px solid #c7d2e2;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(24, 50, 86, .08);
+    overflow: hidden;
+  }
+  .niseva-rms-status-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px;
+    background: linear-gradient(135deg, #f4f8fd, #e9f0f9);
+    border-bottom: 1px solid #d6e0ed;
+  }
+  .niseva-rms-status-title { margin: 0; color: #183256; font-size: 18px; }
+  .niseva-rms-status-subtitle { margin: 4px 0 0; color: #5c6f86; font-size: 12px; }
+  .niseva-rms-badge {
+    display: inline-block;
+    min-width: 92px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-align: center;
+    text-transform: uppercase;
+  }
+  .niseva-rms-badge-connected { background: #238636; }
+  .niseva-rms-badge-connecting { background: #b7791f; }
+  .niseva-rms-badge-disconnected { background: #c53030; }
+  .niseva-rms-badge-disabled, .niseva-rms-badge-unknown { background: #64748b; }
+  .niseva-rms-status-body { padding: 18px 20px 8px; }
+  .niseva-rms-section-label {
+    margin: 0 0 9px;
+    color: #52657c;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .niseva-rms-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .niseva-rms-metric {
+    min-height: 47px;
+    padding: 10px 12px;
+    border: 1px solid #e0e7f0;
+    border-radius: 5px;
+    background: #fbfcfe;
+  }
+  .niseva-rms-metric-label { display: block; color: #718096; font-size: 11px; }
+  .niseva-rms-metric-value {
+    display: block;
+    margin-top: 3px;
+    overflow: hidden;
+    color: #1f334d;
+    font-size: 13px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .niseva-rms-error {
+    margin: 0 0 16px;
+    padding: 9px 12px;
+    border-left: 3px solid #c53030;
+    background: #fff5f5;
+    color: #9b2c2c;
+    font-size: 12px;
+  }
+  .niseva-rms-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 20px;
+    border-top: 1px solid #e3eaf2;
+    background: #fafcff;
+  }
+  .niseva-rms-updated { color: #718096; font-size: 11px; }
+  @media (max-width: 800px) {
+    .niseva-rms-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 520px) {
+    .niseva-rms-status-head, .niseva-rms-actions { align-items: flex-start; flex-direction: column; }
+    .niseva-rms-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="niseva-rms-status-card">
+  <div class="niseva-rms-status-head">
+    <div>
+      <h3 class="niseva-rms-status-title"><%:RMS status%></h3>
+      <p class="niseva-rms-status-subtitle"><%:Connection, registration and device identity%></p>
+    </div>
+    <span id="niseva-rms-connection-badge" class="niseva-rms-badge niseva-rms-badge-unknown"><%:Loading%></span>
+  </div>
+  <div class="niseva-rms-status-body">
+    <p class="niseva-rms-section-label"><%:Connection%></p>
+    <div class="niseva-rms-grid">
+      <div class="niseva-rms-metric"><span class="niseva-rms-metric-label"><%:Management mode%></span><span id="niseva-rms-mode" class="niseva-rms-metric-value">—</span></div>
+      <div class="niseva-rms-metric"><span class="niseva-rms-metric-label"><%:Registration%></span><span id="niseva-rms-registration" class="niseva-rms-metric-value">—</span></div>
+      <div class="niseva-rms-metric"><span class="niseva-rms-metric-label"><%:Next attempt%></span><span id="niseva-rms-next" class="niseva-rms-metric-value">—</span></div>
+    </div>
+    <div id="niseva-rms-error" class="niseva-rms-error" style="display:none"></div>
+    <p class="niseva-rms-section-label"><%:Device identity%></p>
+    <div class="niseva-rms-grid">
+      <div class="niseva-rms-metric"><span class="niseva-rms-metric-label"><%:Serial%></span><span id="niseva-rms-serial" class="niseva-rms-metric-value">—</span></div>
+      <div class="niseva-rms-metric"><span class="niseva-rms-metric-label"><%:LAN MAC%></span><span id="niseva-rms-mac" class="niseva-rms-metric-value">—</span></div>
+      <div class="niseva-rms-metric"><span class="niseva-rms-metric-label"><%:Model / firmware%></span><span id="niseva-rms-firmware" class="niseva-rms-metric-value">—</span></div>
+      <div class="niseva-rms-metric"><span class="niseva-rms-metric-label"><%:Device ID%></span><span id="niseva-rms-device" class="niseva-rms-metric-value">—</span></div>
+      <div class="niseva-rms-metric"><span class="niseva-rms-metric-label"><%:Agent version%></span><span id="niseva-rms-agent" class="niseva-rms-metric-value">—</span></div>
+    </div>
+  </div>
+  <div class="niseva-rms-actions">
+    <span id="niseva-rms-updated" class="niseva-rms-updated"><%:Waiting for status%></span>
+    <button id="niseva-rms-connect" class="cbi-button cbi-button-apply" type="button" onclick="nisevaConnect()"><%:Connect now%></button>
+  </div>
+</div>
+
+<script type="text/javascript">
+(function () {
+  var base = '<%=luci.dispatcher.build_url("admin/services/niseva-rms")%>';
+  function text(value) { return value == null || value === '' ? '—' : String(value); }
+  function set(id, value) { var node = document.getElementById(id); if (node) node.textContent = text(value); }
+  function duration(seconds) {
+    seconds = parseInt(seconds, 10) || 0;
+    if (!seconds) return '<%:Now%>';
+    if (seconds < 60) return seconds + 's';
+    var minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + 'm ' + (seconds % 60) + 's';
+    return Math.floor(minutes / 60) + 'h ' + (minutes % 60) + 'm';
+  }
+  function badgeClass(state) {
+    state = String(state || '').toLowerCase();
+    if (state === 'connected') return 'niseva-rms-badge-connected';
+    if (state === 'connecting') return 'niseva-rms-badge-connecting';
+    if (state === 'disconnected') return 'niseva-rms-badge-disconnected';
+    if (state === 'disabled') return 'niseva-rms-badge-disabled';
+    return 'niseva-rms-badge-unknown';
+  }
+  function render(s) {
+    var state = String(s.connection_state || 'unknown');
+    var badge = document.getElementById('niseva-rms-connection-badge');
+    badge.className = 'niseva-rms-badge ' + badgeClass(state);
+    badge.textContent = state;
+    set('niseva-rms-mode', s.effective_mode || s.mode);
+    set('niseva-rms-registration', s.registration_state);
+    set('niseva-rms-next', duration(s.next_connection_after));
+    set('niseva-rms-serial', s.serial_number);
+    set('niseva-rms-mac', s.lan_mac);
+    set('niseva-rms-firmware', (s.model || '—') + ' / ' + (s.firmware_version || '—'));
+    set('niseva-rms-device', s.device_id);
+    set('niseva-rms-agent', s.agent_version);
+    var error = document.getElementById('niseva-rms-error');
+    if (s.last_error) { error.textContent = '<%:Last error%>: ' + s.last_error; error.style.display = 'block'; }
+    else { error.textContent = ''; error.style.display = 'none'; }
+    var updated = document.getElementById('niseva-rms-updated');
+    updated.textContent = s.last_success ? '<%:Last successful connection recorded%>' : '<%:Waiting for first successful connection%>';
+  }
+  window.nisevaConnect = function () {
+    var button = document.getElementById('niseva-rms-connect');
+    button.disabled = true;
+    button.textContent = '<%:Connecting...%>';
+    XHR.get(base + '/connect', null, function () { button.disabled = false; button.textContent = '<%:Connect now%>'; load(); });
+  };
+  function load() { XHR.get(base + '/status', null, function (x) { try { render(JSON.parse(x.responseText)); } catch (e) { document.getElementById('niseva-rms-connection-badge').textContent = '<%:Unavailable%>'; } }); }
+  load(); window.setInterval(load, 10000);
+}());
+</script>

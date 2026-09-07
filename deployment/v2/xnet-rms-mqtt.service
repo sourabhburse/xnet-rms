@@ -1,0 +1,19 @@
+[Unit]
+Description=Dedicated XNET RMS Mosquitto
+After=network-online.target
+[Service]
+User=xnet-rms-mqtt
+Group=xnet-rms-mqtt
+ExecStart=/usr/sbin/mosquitto -c /etc/xnet-rms/mosquitto.conf
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryMax=512M
+CPUQuota=100%
+TasksMax=64
+LimitNOFILE=32768
+[Install]
+WantedBy=multi-user.target

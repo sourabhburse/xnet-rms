@@ -4,6 +4,11 @@ An enterprise-grade, multi-tenant cloud fleet management and remote access platf
 
 Designed for both **Cloud Multi-Tenant SaaS** and **Closed-Source On-Premise Client Deployments** with non-decompilable Go binaries and cryptographic license protection.
 
+The active implementation uses `backend/internal/rms`, `frontend/src/App.tsx`,
+and `deployment/v2`. The former Docker-era `deploy/` tree and the old demo UI
+are removed; use `PROJECT_HANDOFF.md` and `deployment/v2/README.md` for the
+current operational paths.
+
 ---
 
 ## Repository Structure
@@ -26,15 +31,10 @@ Designed for both **Cloud Multi-Tenant SaaS** and **Closed-Source On-Premise Cli
 ├── backend/                # Compiled Native Go Backend (API, MQTT Bridge, Tunnels)
 │   ├── Dockerfile          # Multi-stage build producing stripped 25MB binary
 │   ├── go.mod              # Go module definition
-│   ├── cmd/server/main.go  # Server entry point with Gin HTTP engine
-│   └── internal/
-│       ├── auth/           # Multi-tenant JWT auth and RBAC middleware
-│       ├── database/       # PostgreSQL connection and GORM auto-migrations
-│       ├── devices/        # Device claiming (Serial+MAC+Secret) & check-in
-│       ├── models/         # GORM relational models and JSONB service storage
-│       ├── mqtt/           # Mosquitto broker bridge, LWT, and command dispatch
-│       ├── telemetry/      # Time-series telemetry ingestion and aggregation
-│       └── tunnel/         # RMS Connect WebSocket reverse tunnel gateway
+│   ├── cmd/server/main.go  # Server entry point and embedded dashboard
+│   ├── cmd/proxy/          # Browser remote-session proxy
+│   ├── cmd/smoke/          # Bounded simulator for one-router qualification
+│   └── internal/rms/       # Enrollment, PKI, telemetry, sessions and migrations
 │
 ├── frontend/               # React 18 + TypeScript + Vite + Ant Design (AntD v5)
 │   ├── package.json        # Dependencies (antd, @ant-design/icons, recharts, xterm)
@@ -43,28 +43,23 @@ Designed for both **Cloud Multi-Tenant SaaS** and **Closed-Source On-Premise Cli
 │   └── src/
 │       ├── main.tsx        # AntD ConfigProvider with #1f2937 dark theme tokens
 │       ├── App.tsx         # Responsive layout shell and navigation sidebar
-│       ├── services/api.ts # Typed Axios API client
-│       ├── pages/
-│       │   ├── Dashboard.tsx    # Fleet overview, carrier share, signal stats
-│       │   ├── DeviceList.tsx   # High-density device table with batch actions
-│       │   └── DeviceDetail.tsx # Telemetry charts, IPsec, Modbus, and UCI tabs
-│       └── components/
-│           ├── ClaimDeviceModal.tsx   # Serial + MAC + Factory Secret wizard
-│           ├── LuciModal.tsx          # Embedded LuCI viewer with 15m session HUD
-│           ├── TerminalModal.tsx      # In-browser xterm.js Web Terminal
-│           └── FileManagerModal.tsx   # In-browser SFTP file explorer
+│       ├── Onboarding.tsx     # Manual, CSV and token-bound onboarding
+│       ├── terminal.ts        # Browser terminal entry point
+│       └── rms.css             # RMS dashboard styles
 │
-└── deploy/                 # Docker Orchestration & Mosquitto Configuration
-    ├── docker-compose.yml  # PostgreSQL 16, Mosquitto 2.0, Niseva RMS Server
-    └── mosquitto/
-        ├── mosquitto.conf  # Broker config with TLS and internal listeners
-        ├── acl.conf        # Nanosecond Pattern ACLs: niseva/device/%c/#
-        └── password_file   # Internal service credentials
+├── deployment/v2/          # Current VPS installer, services, trust and backup tooling
+├── tests/                  # Server and physical-router qualification scripts
+└── artifacts/              # Local release and rollback outputs; not uploaded by default
 ```
 
 ---
 
 ## Key Features
+
+The active Phase 1 release covers enrollment, customer/RBAC isolation, custom
+monitoring profiles, telemetry history, LuCI access and SSH sessions. Firmware
+rollouts, file management, LAN-device forwarding, VPN, alerts and reports are
+roadmap work and are not represented by placeholder screens in the active UI.
 
 1. **Ultra-Lightweight C Agent for 16MB Flash**:
    - Compiles to **< 200 KB** stripped binary; consumes **< 3MB RAM**.
@@ -95,14 +90,18 @@ Designed for both **Cloud Multi-Tenant SaaS** and **Closed-Source On-Premise Cli
 
 ## Quickstart
 
-### 1. Launch the Cloud Server Stack
+### 1. Install the RMS test stack
+
+Use the current isolated installer and its generated credentials. Do not use
+the retired Docker bundle or hard-coded demo accounts.
+
 ```bash
-cd deploy
-docker compose up -d
+cd deployment/v2
+sudo bash install-contabo-test.sh
 ```
-* **Web Dashboard**: `http://localhost:8080`
-* **Default Admin**: `admin@niseva.com` / `Admin@12345`
-* **MQTT Broker**: `localhost:1883` (Internal) / `localhost:8883` (TLS)
+
+The installer documents the dashboard, MQTT and tunnel endpoints and writes the
+initial administrator login under the local administrator home directory.
 
 ### 2. Build the OpenWrt Router Agent
 In your OpenWrt SDK:

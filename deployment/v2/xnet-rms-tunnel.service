@@ -1,0 +1,23 @@
+[Unit]
+Description=XNET RMS tunnel gateway
+After=network-online.target xnet-rms-core.service
+Wants=network-online.target
+[Service]
+User=xnet-rms-tunnel
+Group=xnet-rms-tunnel
+EnvironmentFile=/etc/xnet-rms/tunnel.env
+ExecStart=/opt/xnet-rms/xnet-rms -mode tunnel
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryMax=512M
+CPUQuota=100%
+TasksMax=128
+LimitNOFILE=4096
+UMask=0077
+[Install]
+WantedBy=multi-user.target

@@ -4,3 +4,15 @@ node_modules/
 *.log
 /tmp/
 backend/xnet-rms-server
+artifacts/2s-test-kit/
+.gocache/
+.gopath/
+backend/artifacts/*
+artifacts/*/*.ipk
+artifacts/*/*.debug
+artifacts/*/niseva-agent
+artifacts/*/ELF.txt
+artifacts/*/SHA256SUMS
+artifacts/*/IPKG_BUILD.*/
+artifacts/rms-server-smoke
+artifacts/rms-ws-proxy

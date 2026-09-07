@@ -1,0 +1,103 @@
+package rms
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
+	"testing"
+	"time"
+)
+
+func TestSnapshotValidation(t *testing.T) {
+	now := time.Now().UTC()
+	id := randomID()
+	s := Snapshot{Schema: 1, DeviceID: id, ProfileID: randomID(), ProfileVersion: 1, SourceID: "ipsec", BootID: randomID(), Sequence: 1, ObservedAt: now, Status: "ok", Data: []byte(`{}`)}
+	if _, e := DecodeSnapshot(raw(s), id, now); e != nil {
+		t.Fatal(e)
+	}
+	for _, b := range [][]byte{append(raw(s), []byte(` {}`)...), []byte(`{`), make([]byte, MaxSnapshot+1)} {
+		if _, e := DecodeSnapshot(b, id, now); e == nil {
+			t.Fatal("accepted malformed snapshot")
+		}
+	}
+	if _, e := DecodeSnapshot(raw(s), randomID(), now); e == nil {
+		t.Fatal("accepted another identity")
+	}
+	s.ObservedAt = now.Add(6 * time.Minute)
+	if _, e := DecodeSnapshot(raw(s), id, now); e == nil {
+		t.Fatal("accepted future clock")
+	}
+}
+func TestTypedEntities(t *testing.T) {
+	p := Profile{Entities: "/tunnels", EntityKey: "/name", Fields: []Field{{ID: "state", Path: "/state", Kind: "state", Status: map[string]string{"UP": "healthy"}}, {ID: "bytes", Path: "/bytes", Kind: "counter"}}}
+	values, e := Extract(p, []byte(`{"tunnels":[{"name":"vpn/a","state":"UP","bytes":42}]}`))
+	if e != nil || len(values) != 2 {
+		t.Fatal(values, e)
+	}
+	for _, v := range values {
+		if v.Kind == "state" && v.State != "healthy" {
+			t.Fatal(v)
+		}
+	}
+	for _, s := range []string{`{"tunnels":[{"name":"a"},{"name":"a"}]}`, `{"tunnels":[{"state":"UP"}]}`, `{"tunnels":[{"name":"a","bytes":-1}]}`} {
+		if _, e := Extract(p, []byte(s)); e == nil {
+			t.Fatal("accepted invalid entity", s)
+		}
+	}
+}
+func TestFieldTypeAggregates(t *testing.T) {
+	a := Accumulate(Aggregate{}, Selected{Kind: "gauge", Value: float64(2)}, nil)
+	a = Accumulate(a, Selected{Kind: "gauge", Value: float64(4)}, nil)
+	if a.Average == nil || *a.Average != 3 {
+		t.Fatal(a)
+	}
+	prev := Selected{Kind: "counter", Value: float64(100)}
+	a = Accumulate(Aggregate{}, Selected{Kind: "counter", Value: float64(5)}, &prev)
+	if a.Resets != 1 || a.Delta != 5 || a.Average != nil {
+		t.Fatal(a)
+	}
+	a = Accumulate(Aggregate{}, Selected{Kind: "state", Value: "UP"}, nil)
+	if a.Average != nil || a.Last != "UP" {
+		t.Fatal(a)
+	}
+}
+func TestCertificatesAndProof(t *testing.T) {
+	dir := t.TempDir()
+	if e := InitPKI(dir, []string{"localhost"}); e != nil {
+		t.Fatal(e)
+	}
+	if InitPKI(dir, []string{"localhost"}) == nil {
+		t.Fatal("replaced CA")
+	}
+	ca, e := LoadAuthority(dir)
+	if e != nil {
+		t.Fatal(e)
+	}
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	id := randomID()
+	cert, e := ca.Issue(id, &key.PublicKey, time.Now())
+	if e != nil {
+		t.Fatal(e)
+	}
+	block, _ := pem.Decode([]byte(cert))
+	c, e := x509.ParseCertificate(block.Bytes)
+	if e != nil || c.Subject.CommonName != id {
+		t.Fatal(e)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.Certificate)
+	if _, e = c.Verify(x509.VerifyOptions{Roots: roots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); e != nil {
+		t.Fatal(e)
+	}
+	pub, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	h := sha256.Sum256([]byte("fresh challenge"))
+	sig, _ := ecdsa.SignASN1(rand.Reader, key, h[:])
+	proof := base64.StdEncoding.EncodeToString(sig)
+	if !verifyProof(pub, "fresh challenge", proof) || verifyProof(pub, "other challenge", proof) {
+		t.Fatal("proof binding failed")
+	}
+}

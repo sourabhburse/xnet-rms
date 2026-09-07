@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=niseva-agent
-PKG_VERSION:=1.0.0
+PKG_VERSION:=2.1.0
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=Niseva Engineering <support@niseva.com>
@@ -15,13 +15,13 @@ define Package/$(PKG_NAME)
 	CATEGORY:=xNet
 	SUBMENU:=Management
 	TITLE:=Niseva Cloud RMS Router Agent
-	DEPENDS:=+libubox +libubus +libuci +libblobmsg-json +libmosquitto
+	DEPENDS:=+libubox +libubus +libuci +libblobmsg-json +libmosquitto-ssl +libcurl +libopenssl +ubus
 	URL:=https://www.niseva.com
 endef
 
 define Package/$(PKG_NAME)/description
 	Lightweight native C management agent for Niseva 2S routers connecting to Niseva Cloud RMS.
-	Supports ubus cellular telemetry, failsafe UCI rollback, and on-demand LuCI/WebSSH tunneling.
+	Supports certificate enrollment, bounded JSON collection, and authorized LuCI/terminal sessions.
 endef
 
 define Build/Prepare
@@ -29,7 +29,17 @@ define Build/Prepare
 	$(CP) ./src/* $(PKG_BUILD_DIR)/
 endef
 
+define Package/$(PKG_NAME)/conffiles
+/etc/config/niseva
+/etc/xnet-rms/
+endef
+
 define Package/$(PKG_NAME)/install
+	$(INSTALL_DIR) $(1)/usr/libexec/xnet-rms
+	$(INSTALL_BIN) ./files/ipsec.lua $(1)/usr/libexec/xnet-rms/ipsec.lua
+	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
+	$(INSTALL_DATA) ./files/niseva.keep $(1)/lib/upgrade/keep.d/niseva-agent
+	$(INSTALL_DIR) $(1)/etc/xnet-rms/collectors
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/niseva-agent $(1)/usr/sbin/
 

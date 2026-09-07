@@ -1,223 +1,44 @@
-import React, { useState } from 'react';
-import { Layout, Menu, Typography, Badge, Space, Dropdown, Avatar, Tag, message } from 'antd';
-import {
-  DashboardOutlined,
-  CloudServerOutlined,
-  ThunderboltOutlined,
-  SettingOutlined,
-  AppstoreOutlined,
-  BellOutlined,
-  SafetyCertificateOutlined,
-  UserOutlined,
-  LogoutOutlined,
-} from '@ant-design/icons';
-import { Dashboard } from './pages/Dashboard';
-import { DeviceList } from './pages/DeviceList';
-import { DeviceDetail } from './pages/DeviceDetail';
-import { RmsConnect } from './pages/RmsConnect';
-import { ConfigProfiles } from './pages/ConfigProfiles';
-import { Deployments } from './pages/Deployments';
-import { Alerts } from './pages/Alerts';
-import { Settings } from './pages/Settings';
-import { Login } from './pages/Login';
-
-const { Header, Sider, Content } = Layout;
-
-export const App: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<any>(() => {
-    const saved = localStorage.getItem('xnet_rms_user');
-    const token = localStorage.getItem('niseva_token') || localStorage.getItem('token');
-    return saved && token ? JSON.parse(saved) : null;
-  });
-
-  const [currentView, setCurrentView] = useState<
-    'dashboard' | 'devices' | 'detail' | 'connect' | 'configs' | 'deployments' | 'alerts' | 'settings'
-  >('dashboard');
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
-  const [collapsed, setCollapsed] = useState(false);
-
-  const handleSelectDevice = (id: string) => {
-    setSelectedDeviceId(id);
-    setCurrentView('detail');
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('xnet_rms_user');
-    localStorage.removeItem('niseva_user');
-    localStorage.removeItem('niseva_token');
-    localStorage.removeItem('token');
-    setCurrentUser(null);
-    setCurrentView('dashboard');
-    message.info('You have logged out of XNET Cloud RMS.');
-  };
-
-  // If user is not logged in, show the Login screen
-  if (!currentUser) {
-    return <Login onLoginSuccess={(user) => setCurrentUser(user)} />;
-  }
-
-  const navItems = [
-    { key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
-    { key: 'devices', icon: <CloudServerOutlined />, label: 'Devices (Routers & Gateways)' },
-    { key: 'connect', icon: <ThunderboltOutlined />, label: 'RMS Connect' },
-    { key: 'configs', icon: <SettingOutlined />, label: 'Config Profiles' },
-    { key: 'deployments', icon: <AppstoreOutlined />, label: 'FOTA & Packages' },
-    { key: 'alerts', icon: <BellOutlined />, label: 'Alerts & Rules' },
-    { key: 'settings', icon: <SafetyCertificateOutlined />, label: 'Tenant & Security' },
-  ];
-
-  return (
-    <Layout style={{ minHeight: '100vh', backgroundColor: '#f4f5f7' }}>
-      {/* Brand Slate Sidebar (#1f2937) */}
-      <Sider
-        collapsible
-        collapsed={collapsed}
-        onCollapse={(val) => setCollapsed(val)}
-        width={220}
-        style={{
-          backgroundColor: '#1f2937',
-          borderRight: '1px solid #111827',
-        }}
-      >
-        <div
-          style={{
-            padding: '16px 16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            borderBottom: '1px solid #374151',
-          }}
-        >
-          <img
-            src="/logo.png"
-            alt="XNET Logo"
-            style={{
-              height: 36,
-              maxWidth: collapsed ? 36 : 110,
-              objectFit: 'contain',
-            }}
-          />
-          {!collapsed && (
-            <span
-              style={{
-                color: '#2e90fa',
-                fontWeight: 800,
-                fontSize: 17,
-                letterSpacing: 1,
-              }}
-            >
-              RMS
-            </span>
-          )}
-        </div>
-
-        <Menu
-          theme="dark"
-          selectedKeys={[currentView === 'detail' ? 'devices' : currentView]}
-          mode="inline"
-          items={navItems}
-          onClick={({ key }) => {
-            if (
-              key === 'dashboard' ||
-              key === 'devices' ||
-              key === 'connect' ||
-              key === 'configs' ||
-              key === 'deployments' ||
-              key === 'alerts' ||
-              key === 'settings'
-            ) {
-              setCurrentView(key as any);
-            }
-          }}
-          style={{ backgroundColor: '#1f2937', borderRight: 'none', marginTop: 8 }}
-        />
-      </Sider>
-
-      {/* Clean Light Layout Area */}
-      <Layout style={{ backgroundColor: '#f4f5f7' }}>
-        {/* Top Crisp White Header */}
-        <Header
-          style={{
-            padding: '0 24px',
-            backgroundColor: '#ffffff',
-            borderBottom: '1px solid #e5e7eb',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            height: 60,
-          }}
-        >
-          {/* Tenant Indicator */}
-          <Space size={16}>
-            <Tag color="blue" style={{ fontSize: 13, padding: '4px 10px', borderRadius: 4 }}>
-              Tenant: <strong>{currentUser.organization || 'Acme Solar Corp'}</strong>
-            </Tag>
-            <Badge
-              status="processing"
-              text={<span style={{ color: '#10b981', fontWeight: 500 }}>Live MQTT Gateway</span>}
-            />
-          </Space>
-
-          {/* User & Active Tunnels */}
-          <Space size={16}>
-            <Tag
-              icon={<ThunderboltOutlined />}
-              color="orange"
-              style={{ borderRadius: 4, cursor: 'pointer' }}
-              onClick={() => setCurrentView('connect')}
-            >
-              3 Active Tunnels
-            </Tag>
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: 'profile',
-                    label: 'Organization Settings',
-                    onClick: () => setCurrentView('settings'),
-                  },
-                  {
-                    key: 'license',
-                    label: 'License: Enterprise (500 Nodes)',
-                    onClick: () => setCurrentView('settings'),
-                  },
-                  { type: 'divider' },
-                  {
-                    key: 'logout',
-                    icon: <LogoutOutlined />,
-                    label: 'Log Out',
-                    danger: true,
-                    onClick: handleLogout,
-                  },
-                ],
-              }}
-            >
-              <Space style={{ cursor: 'pointer' }}>
-                <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#2e90fa' }} />
-                <span style={{ color: '#111827', fontWeight: 500 }}>
-                  {currentUser.name} ({currentUser.role === 'SUPER_ADMIN' ? 'Superadmin' : 'Org Admin'})
-                </span>
-              </Space>
-            </Dropdown>
-          </Space>
-        </Header>
-
-        {/* Content Area */}
-        <Content style={{ padding: 24, margin: 0, minHeight: 280, backgroundColor: '#f4f5f7' }}>
-          {currentView === 'dashboard' && <Dashboard onSelectDevice={handleSelectDevice} />}
-          {currentView === 'devices' && <DeviceList onSelectDevice={handleSelectDevice} />}
-          {currentView === 'detail' && (
-            <DeviceDetail deviceId={selectedDeviceId} onBack={() => setCurrentView('devices')} />
-          )}
-          {currentView === 'connect' && <RmsConnect />}
-          {currentView === 'configs' && <ConfigProfiles />}
-          {currentView === 'deployments' && <Deployments />}
-          {currentView === 'alerts' && <Alerts />}
-          {currentView === 'settings' && <Settings />}
-        </Content>
-      </Layout>
-    </Layout>
-  );
-};
-
-export default App;
+import { useEffect, useState } from 'react';
+import { Alert, Button, Card, Form, Input, Layout, Menu, Modal, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import './rms.css';
+import Onboarding from './Onboarding';
+type Row = Record<string, any>;
+async function api(path: string, method = 'GET', data?: unknown) {
+  const response = await fetch('/api/v1/' + path, { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
+  if (response.status === 204) return null;
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+  return body;
+}
+const pretty = (value: unknown) => JSON.stringify(value, null, 2);
+function JsonCreate({ title, path, initial, refresh }: { title: string; path: string; initial: Row; refresh: () => void }) {
+  const [open, setOpen] = useState(false), [value, setValue] = useState(pretty(initial)), [busy, setBusy] = useState(false);
+  return <><Button onClick={() => setOpen(true)}>{title}</Button><Modal title={title} open={open} confirmLoading={busy} onCancel={() => setOpen(false)} onOk={async () => { setBusy(true); try { const result = await api(path, 'POST', JSON.parse(value)); setOpen(false); refresh(); if (result?.token) Modal.info({ title: 'Copy enrollment token now', content: <Typography.Paragraph copyable>{result.token}</Typography.Paragraph> }); else message.success('Saved'); } catch (e) { message.error(String(e)); } finally { setBusy(false); } }}><Input.TextArea aria-label={title + ' JSON'} rows={18} value={value} onChange={e => setValue(e.target.value)} /></Modal></>;
+}
+function DataTable({ rows, action }: { rows: Row[]; action?: (row: Row) => React.ReactNode }) {
+  const keys = [...new Set(rows.flatMap(row => Object.keys(row)))];
+  return <Table size="small" scroll={{ x: true }} rowKey={r => String(r.id || r.source_id || pretty(r))} dataSource={rows} columns={[...keys.map(key => ({ title: key.replace(/_/g, ' '), dataIndex: key, render: (v: unknown) => typeof v === 'object' ? <details><summary>View</summary><pre>{pretty(v)}</pre></details> : String(v ?? '—') })), ...(action ? [{ title: 'Actions', key: 'actions', render: (_: unknown, row: Row) => action(row) }] : [])]} />;
+}
+function Detail({ device, user, back }: { device: Row; user: Row; back: () => void }) {
+  const [sources, setSources] = useState<Row[]>([]), [history, setHistory] = useState<Row[]>([]), [source, setSource] = useState(''), [field, setField] = useState(''), [error, setError] = useState('');
+  const refresh = () => api(`devices/${device.id}/snapshots`).then(setSources).catch(e => setError(String(e)));
+  useEffect(() => { refresh(); const timer = setInterval(refresh, 30000); return () => clearInterval(timer); }, [device.id]);
+  useEffect(() => { if (source) api(`devices/${device.id}/history?source=${encodeURIComponent(source)}`).then(setHistory).catch(e => setError(String(e))); }, [source]);
+  const remote = async (protocol: string) => { try { const session = await api('sessions', 'POST', { device_id: device.id, protocol }); Modal.success({ title: 'Remote session authorized', content: <a target="_blank" rel="noreferrer" href={session.launch_url}>Open remote session</a> }); } catch (e) { message.error(String(e)); } };
+  const fields = sources.find(s => s.source_id === source)?.fields || {};
+  return <Space direction="vertical" size="large" style={{ width: '100%' }}><Button onClick={back}>Back to fleet</Button><Typography.Title level={2}>{device.serial_number}</Typography.Title><Typography.Text type="secondary">{device.model} · {device.id}</Typography.Text>{error && <Alert type="error" message={error} />}<Space wrap>{user.role !== 'VIEWER' && <><Button onClick={() => remote('HTTP_LUCI')}>Open LuCI</Button><Button onClick={() => remote('TERMINAL_SSH')}>Open terminal</Button></>}{user.role === 'SUPER_ADMIN' && <><JsonCreate title="Assign monitoring profile" path={`devices/${device.id}/profiles`} initial={{ profile_id: '', version: 1 }} refresh={refresh} /><Button danger onClick={() => Modal.confirm({ title: 'Revoke this router’s access?', onOk: () => api(`devices/${device.id}/revoke`, 'POST', {}).then(back) })}>Revoke device</Button></>}</Space>{sources.length === 0 && <Alert message="No collected snapshots yet. Assign a profile and wait for collection." />}{sources.map(s => <Card key={s.source_id} title={s.definition.name} extra={<Tag color={s.status === 'ok' ? 'green' : 'red'}>{s.status}</Tag>}><p>Observed {new Date(s.observed_at).toLocaleString()} · {Date.now() - Date.parse(s.observed_at) > s.definition.interval_seconds * 2000 ? 'Stale' : 'Fresh'} · Discarded snapshots: {s.dropped}</p>{s.error && <Alert type="error" message={s.error} />}<DataTable rows={Object.entries(s.fields).map(([id, value]) => ({ id, ...(value as Row) }))} /><details><summary>Raw JSON</summary><pre>{pretty(s.data)}</pre></details></Card>)}<Card title="Source history"><Space wrap><Select aria-label="History source" placeholder="Select source" style={{ width: 220 }} value={source || undefined} onChange={v => { setSource(v); setField(''); }} options={sources.map(s => ({ value: s.source_id, label: s.definition.name }))} /><Select aria-label="Chart field" placeholder="Select numeric field" style={{ width: 240 }} value={field || undefined} onChange={setField} options={Object.entries(fields).filter(([, v]) => ['gauge', 'counter'].includes((v as Row).kind)).map(([id, v]) => ({ value: id, label: (v as Row).label }))} /></Space>{field && <ResponsiveContainer width="100%" height={260}><LineChart data={[...history].reverse().map(h => ({ time: new Date(h.observed_at).toLocaleString(), value: h.fields[field]?.value }))}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="time" hide /><YAxis /><Tooltip /><Line dataKey="value" connectNulls={false} dot={false} /></LineChart></ResponsiveContainer>}<DataTable rows={history} /></Card></Space>;
+}
+export default function App() {
+  const [user, setUser] = useState<Row | null>(null), [loading, setLoading] = useState(true), [view, setView] = useState('devices'), [rows, setRows] = useState<Row[]>([]), [stats, setStats] = useState<Row>({}), [device, setDevice] = useState<Row | null>(null), [error, setError] = useState(''), [page, setPage] = useState(1), [total, setTotal] = useState(0), [query, setQuery] = useState(''), [filter, setFilter] = useState({ source: '', field: '', value: '', tag: '' });
+  useEffect(() => { api('auth/me').then(setUser).catch(() => setUser(null)).finally(() => setLoading(false)); }, []);
+  const refresh = async () => { if (!user || view === 'onboarding') return; try { const params = new URLSearchParams({ page: String(page), q: query, ...filter }); const data = await api(view === 'devices' ? `devices?${params}` : view); setRows(view === 'devices' ? data.items : data); if (view === 'devices') { setTotal(data.total); setStats(await api('dashboard')); } setError(''); } catch (e) { setError(String(e)); } };
+  useEffect(() => { refresh(); const timer = setInterval(refresh, 30000); return () => clearInterval(timer); }, [user, view, page, query, filter]);
+  if (loading) return <p>Loading account…</p>;
+  if (!user) return <main className="login"><Card title="XNET RMS"><p>Sign in to monitor your fleet.</p><Form layout="vertical" onFinish={async values => { try { const result = await api('auth/login', 'POST', values); setUser(result.user); setError(''); } catch (e) { setError(String(e)); } }}><Form.Item name="email" label="Email" rules={[{ required: true, type: 'email' }]}><Input autoComplete="username" /></Form.Item><Form.Item name="password" label="Password" rules={[{ required: true }]}><Input.Password autoComplete="current-password" /></Form.Item>{error && <Alert type="error" message={error} />}<Button htmlType="submit" type="primary">Sign in</Button></Form></Card></main>;
+  const superAdmin = user.role === 'SUPER_ADMIN', admin = superAdmin || user.role === 'ORG_ADMIN';
+  const nav = [{ key: 'devices', label: 'Device fleet' }, { key: 'profiles', label: 'Monitoring profiles' }, ...(user.role !== 'VIEWER' ? [{ key: 'sessions', label: 'Remote sessions' }] : []), ...(admin ? [{ key: 'onboarding', label: 'Add devices' }, { key: 'users', label: 'Users' }, { key: 'enrollment-tokens', label: 'Enrollment' }, { key: 'audit-logs', label: 'Audit records' }] : []), ...(superAdmin ? [{ key: 'organizations', label: 'Customers' }, { key: 'bundles', label: 'Collector bundles' }] : [])];
+  const remove = async (path: string, method = 'DELETE') => { try { await api(path, method, method === 'POST' ? {} : undefined); refresh(); } catch (e) { message.error(String(e)); } };
+  const customColumns = [...new Set(rows.flatMap(d => (d.sources || []).flatMap((s: Row) => Object.keys(s.fields || {}).map(f => `${s.source_id}|${f}`))))].slice(0, 32).map(key => { const [source, field] = key.split('|'); return { title: rows.flatMap(d => d.sources || []).find((s: Row) => s.source_id === source && s.fields[field])?.fields[field]?.label || field, key, render: (_: unknown, d: Row) => { const s = d.sources?.find((v: Row) => v.source_id === source); const v = s?.fields[field]; return v ? <span title={s.stale ? 'Stale source' : s.status}>{String(v.value)} {v.unit} {s.stale ? ' (stale)' : ''}</span> : '—'; } }; });
+  return <Layout style={{ minHeight: '100vh' }}><Layout.Sider width={220} breakpoint="lg" collapsedWidth={0}><h1 className="brand">XNET RMS</h1><Menu theme="dark" selectedKeys={[view]} items={nav} onClick={e => { setView(e.key); setDevice(null); setRows([]); }} /></Layout.Sider><Layout><Layout.Header className="rms-header"><span>{user.email} · {user.role}</span><Button onClick={async () => { await api('auth/logout', 'POST'); setUser(null); setDevice(null); }}>Sign out</Button></Layout.Header><Layout.Content style={{ padding: 28 }}>{error && <Alert type="error" message={error} showIcon />}{device ? <Detail device={device} user={user} back={() => { setDevice(null); refresh(); }} /> : <><Typography.Title level={2}>{nav.find(n => n.key === view)?.label}</Typography.Title><Space wrap style={{ marginBottom: 20 }}>{view === 'organizations' && <JsonCreate title="Create customer" path={view} initial={{ name: '' }} refresh={refresh} />}{view === 'users' && <JsonCreate title="Create user" path={view} initial={{ email: '', password: '', role: 'VIEWER', organization_id: user.organization_id }} refresh={refresh} />}{view === 'enrollment-tokens' && <JsonCreate title="Create enrollment token" path={view} initial={{ name: '', organization_id: user.organization_id, max_uses: 1, expires_at: null, ...(superAdmin ? { token: '' } : {}) }} refresh={refresh} />}{view === 'profiles' && superAdmin && <JsonCreate title="Create profile version" path={view} initial={{ version: 1, name: '', source_id: 'system', type: 'ubus', object: 'system', method: 'info', interval_seconds: 60, timeout_seconds: 5, max_output_bytes: 32768, fields: [{ id: 'uptime', path: '/uptime', label: 'Uptime', unit: 's', kind: 'counter' }] }} refresh={refresh} />}{view === 'bundles' && <JsonCreate title="Sign and publish collector bundle" path={view} initial={{ version: 1, script: '#!/bin/sh\nprintf \'{"status":"unsupported"}\\n\'\nexit 2\n' }} refresh={refresh} />}<Button onClick={refresh}>Refresh</Button></Space>{view === 'onboarding' ? <Onboarding user={user} /> : view === 'devices' ? <><Space size="large" wrap>{Object.entries(stats).map(([key, value]) => <Card key={key}><Statistic title={key} value={value} /></Card>)}</Space><Space wrap style={{ margin: '20px 0' }}><Input placeholder="Filter by tag" value={filter.tag} onChange={e => { setFilter({ ...filter, tag: e.target.value }); setPage(1); }} /><Input.Search placeholder="Search serial number" allowClear onSearch={v => { setQuery(v); setPage(1); }} /><Input placeholder="Source ID" value={filter.source} onChange={e => setFilter({ ...filter, source: e.target.value })} /><Input placeholder="Field ID" value={filter.field} onChange={e => setFilter({ ...filter, field: e.target.value })} /><Input placeholder="Exact value" value={filter.value} onChange={e => setFilter({ ...filter, value: e.target.value })} /></Space><Table rowKey="id" scroll={{ x: true }} dataSource={rows} pagination={{ current: page, total, pageSize: 100, showSizeChanger: false, onChange: setPage }} columns={[{ title: 'Device', dataIndex: 'serial_number', render: (v, d) => <Button type="link" onClick={() => setDevice(d)}>{v}</Button> }, { title: 'Name', dataIndex: 'name' }, { title: 'LAN MAC', dataIndex: 'lan_mac' }, { title: 'Tags', render: (_, d) => d.tags?.map((t: string) => <Tag key={t}>{t}</Tag>) }, { title: 'Model', dataIndex: 'model' }, { title: 'Connectivity', dataIndex: 'status', render: v => <Tag color={v === 'ONLINE' ? 'green' : 'default'}>{v}</Tag> }, ...customColumns]} /></> : <DataTable rows={rows} action={view === 'sessions' ? r => <Button onClick={() => remove(`sessions/${r.id}`)}>Close</Button> : view === 'enrollment-tokens' ? r => <Button disabled={r.revoked} onClick={() => remove(`enrollment-tokens/${r.id}`)}>Revoke</Button> : view === 'users' ? r => <Button disabled={r.disabled || r.id === user.id} onClick={() => remove(`users/${r.id}/disable`, 'POST')}>Disable</Button> : undefined} />}</>}</Layout.Content></Layout></Layout>;
+}

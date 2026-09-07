@@ -293,3 +293,8 @@ To transition remaining **Partial / Mock** items into **Fully Implemented**:
 ---
 
 *This document is maintained as the single source of truth for all functions, handlers, and components across XNET Cloud RMS.*
+> **Current implementation note (2026-09):** This historical inventory predates the
+> Phase 1 RMS consolidation. The active backend is `backend/internal/rms`, and
+> the active frontend is `frontend/src/App.tsx` plus `frontend/src/Onboarding.tsx`.
+> The legacy page, modal, Axios service, and pre-RMS backend packages listed
+> below have been removed; use `PROJECT_HANDOFF.md` for the current ownership map.

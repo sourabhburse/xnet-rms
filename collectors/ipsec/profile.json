@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "name": "IPsec tunnel state and traffic",
+  "source_id": "ipsec",
+  "type": "script",
+  "bundle_id": "REPLACE_WITH_PUBLISHED_BUNDLE_ID",
+  "bundle_version": 1,
+  "interval_seconds": 60,
+  "timeout_seconds": 10,
+  "max_output_bytes": 32768,
+  "entities": "/tunnels",
+  "entity_key": "/id",
+  "fields": [
+    {"id":"name","path":"/name","label":"Tunnel","unit":"","kind":"text"},
+    {"id":"state","path":"/state","label":"State","unit":"","kind":"state","status":{"UP":"healthy","DOWN":"critical"}},
+    {"id":"ike_state","path":"/ike_state","label":"IKE state","unit":"","kind":"state"},
+    {"id":"child_state","path":"/child_state","label":"Child SA state","unit":"","kind":"state"},
+    {"id":"bytes_in","path":"/bytes_in","label":"Received","unit":"B","kind":"counter"},
+    {"id":"bytes_out","path":"/bytes_out","label":"Sent","unit":"B","kind":"counter"}
+  ]
+}

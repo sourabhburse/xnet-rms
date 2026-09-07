@@ -1,0 +1,7 @@
+{
+  "luci-app-niseva-rms": {
+    "description": "XNET RMS settings and status",
+    "read": { "ubus": { "uci": ["get", "state"] } },
+    "write": { "ubus": { "uci": ["set", "add", "delete", "rename", "commit"] } }
+  }
+}

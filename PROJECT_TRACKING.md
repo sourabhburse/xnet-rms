@@ -282,7 +282,7 @@ sequenceDiagram
 | **02** | **Branding Identity** | Embedded official transparent XNET logo (`/logo.png`) into sidebar and login header with branded "RMS" typography. | **Completed** |
 | **03** | **C Agent Memory Safety** | Mandated pure C99 with **zero dynamic memory leaks** using Parson JSON engine to guarantee 24/7 stability on low-cost MIPS 24Kc routers with only 16MB flash and 64MB-128MB RAM. | **Completed** |
 | **04** | **Cross-Compilation Toolchain** | Integrated `/home/sourabh/openwrt-19.07/` MIPS 24Kc buildroot. Successfully compiled and stripped binary to **32 KB** and created standard **19 KB `.ipk` package**. | **Completed** |
-| **05** | **Closed-Source Delivery** | Compiled Go server with `-ldflags="-s -w"` into a single **15 MB standalone machine-code binary** containing the embedded React SPA. Created a 1-command installer script and **5.3 MB VPS bundle** (`deploy/xnet-rms-vps-bundle.tar.gz`). | **Completed** |
+| **05** | **Closed-Source Delivery** | Compiled Go server with `-ldflags="-s -w"` into a standalone machine-code binary containing the embedded React SPA. The historical Docker bundle was retired; current releases use `deployment/v2` and local `artifacts/`. | **Completed** |
 | **06** | **FOTA Rollout Safety** | Implemented pre-flight checks in the C agent (requires > 8MB free RAM in `/tmp`), SHA256 image verification, and backend model matching (`device.HardwareModel == firmware.HardwareModel`) to prevent bricking. | **Completed** |
 | **07** | **Multi-Tenant Onboarding** | Created "+ Onboard New Tenant" wizard that auto-generates tenant database isolation, admin credentials, and a copyable **Tenant Welcome Kit** with 1-click router provisioning commands. | **Completed** |
 | **08** | **Session Logout & Auth Flow** | Fixed logout handler, bound JWT state to `localStorage`, and built a branded Login page with quick-login test accounts. | **Completed** |
@@ -298,14 +298,14 @@ sequenceDiagram
 
 ### 7.1 Deploying the Cloud Server to Your VPS (`82.180.146.203`)
 
-The entire server is pre-packaged into `deploy/xnet-rms-vps-bundle.tar.gz` (5.3 MB). To deploy:
+The old `deploy/xnet-rms-vps-bundle.tar.gz` path is retired. Current deployment uses the reviewed `deployment/v2` installer:
 
 ```bash
 # Step 1: Upload bundle to your VPS
-scp deploy/xnet-rms-vps-bundle.tar.gz root@82.180.146.203:/root/
+scp deployment/v2/* root@82.180.146.203:/root/xnet-rms-v2-release/
 
 # Step 2: Extract and run automated installer
-ssh root@82.180.146.203 "tar -zxvf xnet-rms-vps-bundle.tar.gz && cd xnet-rms-bundle && bash setup-vps.sh"
+ssh root@82.180.146.203 "cd /root/xnet-rms-v2-release && sudo bash install-contabo-test.sh"
 ```
 
 The installer automatically:

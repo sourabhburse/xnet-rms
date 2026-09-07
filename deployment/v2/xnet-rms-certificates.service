@@ -1,0 +1,7 @@
+[Unit]
+Description=Renew certificates for isolated XNET RMS
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/runuser -u ubuntu -- /usr/bin/certbot renew --config-dir /home/ubuntu/.local/share/xnet-rms-acme/config --work-dir /home/ubuntu/.local/share/xnet-rms-acme/work --logs-dir /home/ubuntu/.local/share/xnet-rms-acme/logs --quiet
+# Renewed certificates require an RMS restart; unchanged certificates do not.
+ExecStart=/opt/xnet-rms/refresh-public-certificates --restart-if-changed
