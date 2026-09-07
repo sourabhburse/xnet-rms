@@ -157,8 +157,22 @@ func (s *Core) finishSessionAs(id, closer string) error {
 	if e = tx.QueryRow("SELECT organization_id FROM devices WHERE id=$1", device).Scan(&org); e != nil {
 		return e
 	}
+	if e = tx.Commit(); e != nil {
+		return e
+	}
 
-	return tx.Commit()
+	// Closing the browser already tears down the gateway websocket, but the
+	// router-side worker may still be alive until it observes that close. Send
+	// an explicit command as well so a subsequent session is not rejected as
+	// busy. A failed best-effort publish must not turn a completed DB close
+	// into an API error; the websocket cleanup remains the fallback.
+	if s.Publish != nil {
+		_ = s.Publish("rms/v1/devices/"+device+"/commands", map[string]any{
+			"action":     "close_session",
+			"session_id": id,
+		})
+	}
+	return nil
 }
 func internalOK(r *http.Request) bool {
 	return r.TLS != nil && len(r.TLS.VerifiedChains) > 0 && r.TLS.PeerCertificates[0].Subject.CommonName == "rms-tunnel"
@@ -263,4 +277,3 @@ func generateSSHKeypair(sessionID string) ([]byte, string, ssh.Signer, error) {
 
 	return privBlock, pubSSH, signer, nil
 }
-

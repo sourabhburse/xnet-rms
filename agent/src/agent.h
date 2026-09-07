@@ -10,7 +10,7 @@
 #include <time.h>
 #include "parson.h"
 
-#define AGENT_VERSION "2.1.0"
+#define AGENT_VERSION "2.1.1"
 #define DEFAULT_SERVER ""
 #define DEFAULT_MQTT_HOST ""
 #define DEFAULT_MQTT_PORT 8883
@@ -100,6 +100,7 @@ void handle_sysupgrade(const char *url, const char *sha256);
 int open_reverse_tunnel(const char *session_id, const char *protocol, const char *gateway_url, int ttl_seconds, const char *public_key);
 void check_reverse_tunnel(void);
 void close_reverse_tunnel(void);
+int close_reverse_tunnel_session(const char *session_id);
 int rms_ssh_inject_key(const char *session_id, const char *pubkey);
 void rms_ssh_cleanup_key(void);
 

@@ -19,6 +19,7 @@ static pid_t tunnel_pid=0;
 static struct uloop_timeout ttl;
 static int running;
 static int s_mounted=0;
+static char active_session_id[33];
 
 int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
     if (!rms_id(session_id) || !pubkey || strlen(pubkey) > 1024) return -1;
@@ -77,6 +78,10 @@ static void expire(struct uloop_timeout *t){
 }
 
 int open_reverse_tunnel(const char *id,const char *protocol,const char *url,int seconds, const char *public_key){
+    /* A worker can finish between main-loop iterations. Reap it before
+     * deciding whether the router is still busy so the next session can
+     * start immediately after the browser closes. */
+    check_reverse_tunnel();
     if(running||!rms_id(id)||seconds<1||seconds>900)return -1;
     if(!strcmp(protocol, "TERMINAL_SSH")) {
         if (!public_key || rms_ssh_inject_key(id, public_key) != 0) return -1;
@@ -92,6 +97,7 @@ int open_reverse_tunnel(const char *id,const char *protocol,const char *url,int 
     }
     tunnel_pid=pid;
     running=1;
+    snprintf(active_session_id,sizeof(active_session_id),"%s",id);
     ttl.cb=expire;
     uloop_timeout_set(&ttl,seconds*1000);
     return 0;
@@ -104,6 +110,7 @@ void check_reverse_tunnel(void){
         if(w==tunnel_pid||(w<0&&errno==ECHILD)){
             tunnel_pid=0;
             running=0;
+            active_session_id[0]=0;
             uloop_timeout_cancel(&ttl);
             rms_ssh_cleanup_key();
         }
@@ -119,6 +126,14 @@ void close_reverse_tunnel(void){
         }
         running=0;
     }
+    active_session_id[0]=0;
     uloop_timeout_cancel(&ttl);
     rms_ssh_cleanup_key();
+}
+
+int close_reverse_tunnel_session(const char *session_id){
+    if (!rms_id(session_id) || !running || strcmp(active_session_id, session_id) != 0)
+        return -1;
+    close_reverse_tunnel();
+    return 0;
 }

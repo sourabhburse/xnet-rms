@@ -3,7 +3,7 @@
 set -eu
 : "${OPENWRT_ROOT:?Set the existing OpenWrt source or SDK root}"
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
-out=${1:-"$root/artifacts/agent-2.1.0"}
+out=${1:-"$root/artifacts/agent-2.1.1"}
 mkdir -p "$out"
 out=$(CDPATH= cd -- "$out" && pwd)
 stage="$OPENWRT_ROOT/staging_dir/target-mips_24kc_musl"
@@ -33,7 +33,7 @@ printf '/etc/xnet-rms/\n/etc/config/niseva\n' > "$pkg/lib/upgrade/keep.d/niseva-
 printf '/etc/config/niseva\n' > "$pkg/CONTROL/conffiles"
 cat > "$pkg/CONTROL/control" <<'CONTROL'
 Package: niseva-agent
-Version: 2.1.0-1
+Version: 2.1.1-2
 Architecture: mips_24kc
 Maintainer: Niseva Engineering <support@niseva.com>
 Section: net
@@ -42,5 +42,5 @@ Depends: libc, libgcc1, libubox20191228, libuci20130104, libmosquitto-ssl, libcu
 Description: XNET RMS certificate identity, bounded collection and remote sessions
 CONTROL
 sh "$OPENWRT_ROOT/scripts/ipkg-build" -o 0 -g 0 "$pkg" "$out"
-(cd "$out" && sha256sum niseva-agent niseva-agent_2.1.0-1_mips_24kc.ipk > SHA256SUMS)
-echo "Built $out/niseva-agent_2.1.0-1_mips_24kc.ipk"
+(cd "$out" && sha256sum niseva-agent niseva-agent_2.1.1-2_mips_24kc.ipk > SHA256SUMS)
+echo "Built $out/niseva-agent_2.1.1-2_mips_24kc.ipk"
