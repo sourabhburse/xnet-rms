@@ -16,4 +16,15 @@ socket.onclose = () => terminal.write(opened ? "\r\n[Session closed]\r\n" : "\r\
 // both a failure and a close.
 socket.onerror = () => {};
 terminal.onData(data => { if (socket.readyState === WebSocket.OPEN) socket.send(data); });
-window.addEventListener("beforeunload", () => socket.close());
+let closing = false;
+const closeSession = () => {
+  if (closing) return;
+  closing = true;
+  // WebSocket close is normally enough, but a page unload can abort it before
+  // the gateway observes the close. The same-origin beacon closes the session
+  // in the core even when the TCP/WebSocket teardown is incomplete.
+  navigator.sendBeacon("/close", new Blob([], { type: "application/octet-stream" }));
+  socket.close();
+};
+window.addEventListener("pagehide", closeSession, { once: true });
+window.addEventListener("beforeunload", closeSession, { once: true });

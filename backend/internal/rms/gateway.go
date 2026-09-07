@@ -170,6 +170,19 @@ func (g *Gateway) Handler() http.Handler {
 		g.mu.Lock()
 		p := g.pairs[id]
 		g.mu.Unlock()
+		if r.URL.Path == "/close" {
+			if r.Method != http.MethodPost {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			if p != nil {
+				g.close(id, p)
+			} else {
+				_ = g.call("POST", "/internal/sessions/"+id+"/close", nil, nil)
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if p == nil {
 			w.Header().Set("Retry-After", "2")
 			fail(w, 503, "router connecting; retry shortly")
