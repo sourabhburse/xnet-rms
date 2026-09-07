@@ -183,17 +183,22 @@ func (g *Gateway) Handler() http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if p == nil {
-			w.Header().Set("Retry-After", "2")
-			fail(w, 503, "router connecting; retry shortly")
-			return
-		}
 		if session.Protocol == "TERMINAL_SSH" {
 			if r.URL.Path == "/ws" {
+				if p == nil {
+					w.Header().Set("Retry-After", "1")
+					fail(w, 503, "router connecting; retry shortly")
+					return
+				}
 				g.terminal(w, r, id, p)
 				return
 			}
 			if r.URL.Path == "/raw" {
+				if p == nil {
+					w.Header().Set("Retry-After", "1")
+					fail(w, 503, "router connecting; retry shortly")
+					return
+				}
 				g.raw(w, r, id, p)
 				return
 			}
@@ -208,6 +213,11 @@ func (g *Gateway) Handler() http.Handler {
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write(data)
+			return
+		}
+		if p == nil {
+			w.Header().Set("Retry-After", "2")
+			fail(w, 503, "router connecting; retry shortly")
 			return
 		}
 		g.proxy(w, r, id, p)
