@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -136,6 +137,26 @@ func TLSConfig(dir, identity string, server bool) (*tls.Config, error) {
 	}
 	return c, nil
 }
+
+// Browser session hosts authenticate with their host-only session cookie.
+// Requesting a TLS client certificate here can make Chromium cancel WebSocket
+// handshakes when moving between session subdomains. Keep mTLS on the router
+// host; a request routed to /router on a browser TLS connection still fails
+// the gateway's VerifiedChains check.
+func ConfigureTunnelTLS(c *tls.Config, domain string) {
+	browser := c.Clone()
+	browser.ClientAuth = tls.NoClientCert
+	browser.ClientCAs = nil
+	browser.GetConfigForClient = nil
+	c.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		suffix := "." + domain
+		if strings.HasSuffix(hello.ServerName, suffix) && validID(strings.TrimSuffix(hello.ServerName, suffix)) {
+			return browser, nil
+		}
+		return nil, nil
+	}
+}
+
 func InitPKI(dir string, hosts []string) error {
 	if len(hosts) == 0 {
 		return errors.New("server DNS names required")

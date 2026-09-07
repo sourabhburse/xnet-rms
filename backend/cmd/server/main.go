@@ -117,6 +117,9 @@ func main() {
 		log.Fatal(e)
 	}
 	server := &http.Server{Addr: c.Listen, Handler: h, TLSConfig: tc, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 * 1024}
+	if *mode == "tunnel" {
+		rms.ConfigureTunnelTLS(tc, c.TunnelDomain)
+	}
 	go func() {
 		<-ctx.Done()
 		deadline, done := context.WithTimeout(context.Background(), 10*time.Second)
