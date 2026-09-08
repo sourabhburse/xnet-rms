@@ -41,6 +41,7 @@ export interface Device {
   name: string;
   lan_mac: string;
   tags: string[];
+  groups?: string[];
   serial_number: string;
   model: string;
   firmware_version: string;
@@ -76,6 +77,15 @@ export interface TagItem {
   id: string;
   organization_id: string;
   name: string;
+}
+
+export interface DeviceGroup {
+  id: string;
+  organization_id: string;
+  name: string;
+  description: string;
+  created_at?: string;
+  device_count: number;
 }
 
 export interface ProfileField {

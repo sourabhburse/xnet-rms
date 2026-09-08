@@ -13,6 +13,7 @@ import {
   Registration,
   SessionItem,
   TagItem,
+  DeviceGroup,
   User,
 } from './types';
 import { api, formatApiError, ApiError } from './api';
@@ -27,6 +28,7 @@ import AddDevices from './components/AddDevices';
 import AvailableToClaim from './components/AvailableToClaim';
 import RegistrationRequests from './components/RegistrationRequests';
 import TagsManager from './components/TagsManager';
+import GroupsManager from './components/GroupsManager';
 import SessionsManager from './components/SessionsManager';
 import AdminViews from './components/AdminViews';
 import Login from './Login';
@@ -56,6 +58,7 @@ export default function App() {
   const [pendingDevices, setPendingDevices] = useState<PendingDevice[]>([]);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [tags, setTags] = useState<TagItem[]>([]);
+  const [groups, setGroups] = useState<DeviceGroup[]>([]);
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [adminData, setAdminData] = useState<any[]>([]);
 
@@ -101,12 +104,14 @@ export default function App() {
       const isOperator = isOrgAdmin || user.role === 'OPERATOR';
 
       // Always fetch dashboard stats and tags
-      const [dashStats, tagList] = await Promise.all([
+      const [dashStats, tagList, groupList] = await Promise.all([
         api<DashboardStats>(`dashboard${selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : ''}`).catch(() => ({ total: 0, online: 0, offline: 0, revoked: 0 })),
         api<TagItem[]>('tags').catch(() => []),
+        api<DeviceGroup[]>(`groups${selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : ''}`).catch(() => []),
       ]);
       setStats(dashStats && typeof dashStats === 'object' ? dashStats : { total: 0, online: 0, offline: 0, revoked: 0 });
       setTags(Array.isArray(tagList) ? tagList : []);
+      setGroups(Array.isArray(groupList) ? groupList : []);
 
       // Fetch pending devices and registrations if admin
       if (isOrgAdmin) {
@@ -127,7 +132,7 @@ export default function App() {
       }
 
       // Fetch view-specific dataset
-      if (view === 'devices' || view === 'dashboard') {
+      if (view === 'devices' || view === 'dashboard' || view === 'groups') {
         const params = new URLSearchParams({
           page: String(page),
           q: searchQuery,
@@ -391,6 +396,18 @@ export default function App() {
                     onOpenTerminal={handleOpenTerminal}
                   />
                 </div>
+              )}
+
+              {/* Add Devices */}
+              {view === 'groups' && (
+                <GroupsManager
+                  user={user}
+                  organizations={organizations}
+                  selectedOrg={selectedOrg}
+                  groups={groups}
+                  devices={devices}
+                  onRefresh={refreshData}
+                />
               )}
 
               {/* Add Devices */}

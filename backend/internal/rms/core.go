@@ -86,6 +86,13 @@ func (s *Core) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/registrations/preview", s.protect("ORG_ADMIN", s.previewCSV))
 	m.HandleFunc("GET /api/v1/tags", s.protect("VIEWER", s.tags))
 	m.HandleFunc("POST /api/v1/tags", s.protect("ORG_ADMIN", s.createTag))
+	m.HandleFunc("GET /api/v1/groups", s.protect("VIEWER", s.groups))
+	m.HandleFunc("POST /api/v1/groups", s.protect("ORG_ADMIN", s.createGroup))
+	m.HandleFunc("PATCH /api/v1/groups/{id}", s.protect("ORG_ADMIN", s.updateGroup))
+	m.HandleFunc("DELETE /api/v1/groups/{id}", s.protect("ORG_ADMIN", s.deleteGroup))
+	m.HandleFunc("GET /api/v1/groups/{id}/devices", s.protect("VIEWER", s.groupDevices))
+	m.HandleFunc("PUT /api/v1/groups/{id}/devices/{device}", s.protect("ORG_ADMIN", s.groupDevice))
+	m.HandleFunc("DELETE /api/v1/groups/{id}/devices/{device}", s.protect("ORG_ADMIN", s.groupDevice))
 	m.HandleFunc("GET /api/v1/dashboard", s.protect("VIEWER", s.dashboard))
 	m.HandleFunc("POST /api/v1/provision/check-in", s.enroll)
 	m.HandleFunc("POST /api/v1/provision/challenge", s.challenge)
@@ -281,7 +288,7 @@ func (s *Core) listDevices(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "query unavailable")
 		return
 	}
-	rows, e := jsonRows(s.DB, `SELECT row_to_json(t) FROM (SELECT d.id,d.organization_id,d.name,d.lan_mac,coalesce((SELECT jsonb_agg(t.name ORDER BY t.name) FROM device_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.device_id=d.id),'[]') AS tags,d.serial_number,d.model,d.firmware_version,d.revoked,d.last_seen,CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END AS status,coalesce((SELECT jsonb_agg(jsonb_build_object('source_id',c.source_id,'fields',c.fields,'status',c.status,'received_at',c.received_at,'observed_at',c.observed_at,'stale',c.observed_at<now()-((p.definition->>'interval_seconds')::integer*2)*interval '1 second')) FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE c.device_id=d.id),'[]') AS sources FROM devices d WHERE `+filter+` ORDER BY serial_number LIMIT 100 OFFSET $7) t`, append(args, (page-1)*100)...)
+	rows, e := jsonRows(s.DB, `SELECT row_to_json(t) FROM (SELECT d.id,d.organization_id,d.name,d.lan_mac,coalesce((SELECT jsonb_agg(t.name ORDER BY t.name) FROM device_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.device_id=d.id),'[]') AS tags,coalesce((SELECT jsonb_agg(g.name ORDER BY g.name) FROM device_group_members gm JOIN device_groups g ON g.id=gm.group_id WHERE gm.device_id=d.id),'[]') AS groups,d.serial_number,d.model,d.firmware_version,d.revoked,d.last_seen,CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END AS status,coalesce((SELECT jsonb_agg(jsonb_build_object('source_id',c.source_id,'fields',c.fields,'status',c.status,'received_at',c.received_at,'observed_at',c.observed_at,'stale',c.observed_at<now()-((p.definition->>'interval_seconds')::integer*2)*interval '1 second')) FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE c.device_id=d.id),'[]') AS sources FROM devices d WHERE `+filter+` ORDER BY serial_number LIMIT 100 OFFSET $7) t`, append(args, (page-1)*100)...)
 	if e != nil {
 		fail(w, 503, "query unavailable")
 		return

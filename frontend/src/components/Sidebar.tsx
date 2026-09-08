@@ -15,6 +15,7 @@ import {
   FileTextOutlined,
   ApartmentOutlined,
   CodeOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import { User } from '../types';
 
@@ -52,6 +53,11 @@ export default function Sidebar({
       key: 'devices',
       icon: <HddOutlined />,
       label: 'Device Fleet',
+    },
+    {
+      key: 'groups',
+      icon: <AppstoreOutlined />,
+      label: 'Device Groups',
     },
   ];
 

@@ -145,6 +145,18 @@ export default function DeviceList({
       ),
     },
     {
+      title: 'Groups',
+      dataIndex: 'groups',
+      key: 'groups',
+      render: (itemGroups: string[]) => (
+        <Space size={[0, 4]} wrap>
+          {itemGroups && itemGroups.length > 0 ? itemGroups.map(g => (
+            <Tag color="geekblue" key={g} style={{ fontSize: 11, borderRadius: 4 }}>{g}</Tag>
+          )) : <span style={{ color: '#94a3b8', fontSize: 12 }}>None</span>}
+        </Space>
+      ),
+    },
+    {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
