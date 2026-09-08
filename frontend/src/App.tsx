@@ -224,8 +224,8 @@ export default function App() {
   // Unauthenticated: Show NCMS-inspired Login Screen
   if (loadingUser) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f8fafc' }}>
-        <p style={{ color: '#64748b' }}>Loading XNET RMS...</p>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f3f3f3' }}>
+        <p style={{ color: '#696969' }}>Loading XNET RMS...</p>
       </div>
     );
   }
@@ -252,7 +252,7 @@ export default function App() {
         awaitingCount={awaitingCount}
       />
 
-      <Layout style={{ background: '#f8fafc' }}>
+      <Layout style={{ background: '#f3f3f3' }}>
         <Navbar
           user={user}
           organizations={organizations}

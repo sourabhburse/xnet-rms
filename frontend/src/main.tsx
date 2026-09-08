@@ -8,22 +8,26 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <ConfigProvider
       theme={{
         token: {
-          colorPrimary: '#2e90fa',
+          colorPrimary: '#3f3f3f',
+          colorInfo: '#3f3f3f',
+          colorSuccess: '#3f3f3f',
+          colorWarning: '#3f3f3f',
+          colorError: '#3f3f3f',
           colorBgBase: '#ffffff',
           colorBgContainer: '#ffffff',
-          colorBgLayout: '#f4f5f7',
-          colorBorder: '#e5e7eb',
-          colorText: '#111827',
-          colorTextSecondary: '#6b7280',
-          borderRadius: 6,
+          colorBgLayout: '#f3f3f3',
+          colorBorder: '#d7d7d7',
+          colorText: '#252525',
+          colorTextSecondary: '#696969',
+          borderRadius: 2,
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
         },
         components: {
           Table: {
-            headerBg: '#f8fafc',
-            headerColor: '#334155',
-            rowHoverBg: '#f1f5f9',
-            borderColor: '#e2e8f0',
+            headerBg: '#f1f1f1',
+            headerColor: '#3f3f3f',
+            rowHoverBg: '#f6f6f6',
+            borderColor: '#d7d7d7',
           },
           Card: {
             headerBg: '#ffffff',

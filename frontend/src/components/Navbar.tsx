@@ -29,19 +29,12 @@ export default function Navbar({
 }: NavbarProps) {
   const isSuperAdmin = user.role === 'SUPER_ADMIN';
 
-  const roleColorMap: Record<string, string> = {
-    SUPER_ADMIN: 'magenta',
-    ORG_ADMIN: 'blue',
-    OPERATOR: 'cyan',
-    VIEWER: 'default',
-  };
-
   return (
     <header className="rms-navbar">
       <div className="rms-nav-left">
         {isSuperAdmin && (
           <Space>
-            <BankOutlined style={{ color: '#64748b' }} />
+            <BankOutlined />
             <Select
               aria-label="Filter by organization"
               placeholder="All Customers"
@@ -73,9 +66,9 @@ export default function Navbar({
         </Tooltip>
 
         <div className="user-badge">
-          <UserOutlined style={{ color: '#64748b' }} />
+          <UserOutlined />
           <span>{user.email}</span>
-          <Tag color={roleColorMap[user.role] || 'blue'} style={{ margin: 0 }}>
+          <Tag style={{ margin: 0 }}>
             {user.role}
           </Tag>
         </div>

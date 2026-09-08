@@ -77,17 +77,7 @@ export default function Sidebar({
           <span>
             Available to Claim
             {pendingCount > 0 && (
-              <span
-                style={{
-                  marginLeft: 6,
-                  background: '#8b5cf6',
-                  color: '#fff',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  padding: '1px 6px',
-                  borderRadius: 10,
-                }}
-              >
+              <span className="menu-count">
                 {pendingCount}
               </span>
             )}
@@ -101,17 +91,7 @@ export default function Sidebar({
           <span>
             Awaiting Device
             {awaitingCount > 0 && (
-              <span
-                style={{
-                  marginLeft: 6,
-                  background: '#f59e0b',
-                  color: '#fff',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  padding: '1px 6px',
-                  borderRadius: 10,
-                }}
-              >
+              <span className="menu-count">
                 {awaitingCount}
               </span>
             )}

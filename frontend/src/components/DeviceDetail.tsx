@@ -287,7 +287,7 @@ export default function DeviceDetail({
         className="rms-card"
         title={
           <Space>
-            <SafetyCertificateOutlined style={{ color: '#0284c7' }} />
+            <SafetyCertificateOutlined />
             <span>Remote Management (RMS Connect)</span>
           </Space>
         }
@@ -303,7 +303,6 @@ export default function DeviceDetail({
               onClick={handleOpenLuCI}
               loading={sessionLoading}
               disabled={!canOperate || device.status !== 'ONLINE'}
-              style={{ background: '#0284c7', borderColor: '#0284c7' }}
             >
               Open LuCI
             </Button>
@@ -407,7 +406,7 @@ export default function DeviceDetail({
                           <span
                             style={{
                               fontSize: 12,
-                              color: s.stale ? '#dc2626' : '#16a34a',
+                              color: s.stale ? '#555555' : '#333333',
                               fontWeight: 500,
                             }}
                           >
@@ -500,14 +499,14 @@ export default function DeviceDetail({
                   <div style={{ height: 280, width: '100%', marginBottom: 24 }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                        <XAxis dataKey="time" stroke="#64748b" />
-                        <YAxis stroke="#64748b" />
+                        <CartesianGrid strokeDasharray="3 3" stroke="#d7d7d7" />
+                        <XAxis dataKey="time" stroke="#696969" />
+                        <YAxis stroke="#696969" />
                         <Tooltip />
                         <Line
                           type="monotone"
                           dataKey="value"
-                          stroke="#0284c7"
+                          stroke="#3f3f3f"
                           strokeWidth={2}
                           dot={false}
                           connectNulls={false}
