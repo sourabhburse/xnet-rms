@@ -643,7 +643,17 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 	select {
 	case <-ctx.Done():
 		log.Printf("rms tunnel session %s request timeout/cancel path=%s: %v", id, r.URL.Path, ctx.Err())
-		g.close(id, p)
+		// LuCI routinely cancels an in-flight status request when the user
+		// changes pages. Keep the tunnel alive and consume that request's
+		// eventual router response before releasing httpLock, otherwise the
+		// next page request can receive a stale response or a closed session.
+		select {
+		case <-p.responses:
+			log.Printf("rms tunnel session %s drained canceled response path=%s", id, r.URL.Path)
+		case <-time.After(5 * time.Second):
+			log.Printf("rms tunnel session %s canceled response did not arrive", id)
+			g.close(id, p)
+		}
 		fail(w, 504, "router timeout")
 	case <-p.done:
 		fail(w, 502, "session closed")
