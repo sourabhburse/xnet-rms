@@ -215,6 +215,19 @@ func (g *Gateway) Handler() http.Handler {
 			w.Write(data)
 			return
 		}
+		if p == nil && session.Protocol == "HTTP_LUCI" {
+			// The browser follows /launch immediately. Give the router's
+			// outbound WebSocket a short, bounded window to attach so LuCI
+			// does not fail its first document request during normal MQTT
+			// and TLS startup latency.
+			deadline := time.Now().Add(10 * time.Second)
+			for p == nil && time.Now().Before(deadline) {
+				time.Sleep(100 * time.Millisecond)
+				g.mu.Lock()
+				p = g.pairs[id]
+				g.mu.Unlock()
+			}
+		}
 		if p == nil {
 			w.Header().Set("Retry-After", "2")
 			fail(w, 503, "router connecting; retry shortly")
@@ -266,6 +279,7 @@ func (g *Gateway) router(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 }
+
 type wsNetConn struct {
 	r      io.Reader
 	p      *Pair
@@ -428,7 +442,7 @@ func (g *Gateway) terminal(w http.ResponseWriter, r *http.Request, id string, p 
 			ssh.KeyAlgoRSASHA512,
 			ssh.KeyAlgoED25519,
 		},
-		Timeout:         10 * time.Second,
+		Timeout: 10 * time.Second,
 	}
 
 	ncc, chans, reqs, err := ssh.NewClientConn(conn, "127.0.0.1:22", cfg)
@@ -600,7 +614,15 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 			headers[k] = strings.Join(v, ", ")
 		}
 	}
-	frame := HTTPFrame{Method: r.Method, Path: r.URL.RequestURI(), Headers: headers, Body: b}
+	path := r.URL.RequestURI()
+	// LuCI is mounted below /cgi-bin/luci on OpenWrt. The session launch
+	// redirects the browser to / for a clean session URL, so map only that
+	// browser-root request to LuCI's actual entry point. Other paths, including
+	// /luci-static and /cgi-bin/luci, must pass through unchanged.
+	if path == "/" {
+		path = "/cgi-bin/luci/"
+	}
+	frame := HTTPFrame{Method: r.Method, Path: path, Headers: headers, Body: b}
 	p.write.Lock()
 	p.router.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	e = p.router.WriteJSON(frame)
