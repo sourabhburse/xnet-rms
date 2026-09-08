@@ -606,7 +606,12 @@ func safeHeader(k string) bool {
 }
 func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pair) {
 	p.httpLock.Lock()
-	defer p.httpLock.Unlock()
+	releaseLock := true
+	defer func() {
+		if releaseLock {
+			p.httpLock.Unlock()
+		}
+	}()
 	r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
 	b, e := io.ReadAll(r.Body)
 	if e != nil {
@@ -647,13 +652,18 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 		// changes pages. Keep the tunnel alive and consume that request's
 		// eventual router response before releasing httpLock, otherwise the
 		// next page request can receive a stale response or a closed session.
-		select {
-		case <-p.responses:
-			log.Printf("rms tunnel session %s drained canceled response path=%s", id, r.URL.Path)
-		case <-time.After(5 * time.Second):
-			log.Printf("rms tunnel session %s canceled response did not arrive", id)
-			g.close(id, p)
-		}
+		releaseLock = false
+		go func(path string) {
+			select {
+			case <-p.responses:
+				log.Printf("rms tunnel session %s drained canceled response path=%s", id, path)
+			case <-p.done:
+				log.Printf("rms tunnel session %s ended while draining path=%s", id, path)
+			case <-time.After(30 * time.Second):
+				log.Printf("rms tunnel session %s canceled response still pending path=%s", id, path)
+			}
+			p.httpLock.Unlock()
+		}(r.URL.Path)
 		fail(w, 504, "router timeout")
 	case <-p.done:
 		fail(w, 502, "session closed")
