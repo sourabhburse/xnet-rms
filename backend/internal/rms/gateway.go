@@ -599,7 +599,7 @@ func (g *Gateway) raw(w http.ResponseWriter, r *http.Request, id string, p *Pair
 }
 func safeHeader(k string) bool {
 	switch strings.ToLower(k) {
-	case "content-type", "accept", "accept-language", "user-agent", "referer", "location", "cache-control", "content-disposition":
+	case "content-type", "accept", "accept-language", "user-agent", "referer", "origin", "x-requested-with", "x-csrf-token", "location", "set-cookie", "cache-control", "content-disposition":
 		return true
 	}
 	return false
