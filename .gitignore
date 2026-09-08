@@ -16,3 +16,4 @@ artifacts/*/SHA256SUMS
 artifacts/*/IPKG_BUILD.*/
 artifacts/rms-server-smoke
 artifacts/rms-ws-proxy
+docs/superpowers/
