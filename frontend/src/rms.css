@@ -126,7 +126,6 @@ body {
   --rms-muted: #718096;
   --rms-shadow: 0 10px 28px rgba(25,42,70,.08);
 }
-   while surfaces and navigation stay bright and easy to scan. */
 body, #root { background: #f6f8fc; color: #172238; }
 .rms-sider { background: #fff !important; border-right: 1px solid #e4e9f1; box-shadow: 4px 0 18px rgba(25,42,70,.04); }
 .rms-brand { background: #fff; border-bottom-color: #e4e9f1; }
