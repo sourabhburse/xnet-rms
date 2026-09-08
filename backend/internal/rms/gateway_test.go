@@ -6,11 +6,32 @@ import (
 	"crypto/rand"
 	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
+
+func TestCacheableLuCIAsset(t *testing.T) {
+	for _, path := range []string{"/luci-static/resources/luci.js?v=git-1", "/luci-static/resources/cascade.css", "/brand.png"} {
+		r := &http.Request{Method: http.MethodGet, URL: &url.URL{Path: path}}
+		if !cacheableLuCIAsset(r, http.StatusOK) {
+			t.Errorf("expected cacheable asset: %s", path)
+		}
+	}
+	for _, path := range []string{"/cgi-bin/luci/admin/status/overview", "/cgi-bin/luci/admin/uci/apply", "/cgi-bin/luci/admin/ubus"} {
+		r := &http.Request{Method: http.MethodGet, URL: &url.URL{Path: path}}
+		if cacheableLuCIAsset(r, http.StatusOK) {
+			t.Errorf("expected dynamic path to remain uncached: %s", path)
+		}
+	}
+	post := &http.Request{Method: http.MethodPost, URL: &url.URL{Path: "/luci-static/resources/luci.js"}}
+	if cacheableLuCIAsset(post, http.StatusOK) {
+		t.Fatal("cached a non-GET request")
+	}
+}
 
 func TestWsNetConnAdapter(t *testing.T) {
 	pr, pw := io.Pipe()

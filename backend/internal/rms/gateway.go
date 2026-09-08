@@ -604,6 +604,24 @@ func safeHeader(k string) bool {
 	}
 	return false
 }
+func cacheableLuCIAsset(r *http.Request, status int) bool {
+	if status != http.StatusOK || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+		return false
+	}
+	path := r.URL.Path
+	if strings.HasPrefix(path, "/cgi-bin/luci") {
+		return false
+	}
+	if strings.HasPrefix(path, "/luci-static/") || strings.HasPrefix(path, "/cgi-bin/luci-static/") {
+		return true
+	}
+	for _, ext := range []string{".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf"} {
+		if strings.HasSuffix(strings.ToLower(path), ext) {
+			return true
+		}
+	}
+	return false
+}
 func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pair) {
 	p.httpLock.Lock()
 	releaseLock := true
@@ -693,7 +711,11 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 			}
 		}
 		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
-		w.Header().Set("Cache-Control", "no-store")
+		if cacheableLuCIAsset(r, res.Status) {
+			w.Header().Set("Cache-Control", "private, max-age=3600")
+		} else {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		w.WriteHeader(res.Status)
 		w.Write(res.Body)
 	}
