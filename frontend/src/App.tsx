@@ -1,44 +1,462 @@
-import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Form, Input, Layout, Menu, Modal, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import React, { useEffect, useState } from 'react';
+import { Alert, Layout, Modal, message } from 'antd';
 import './rms.css';
-import Onboarding from './Onboarding';
-type Row = Record<string, any>;
-async function api(path: string, method = 'GET', data?: unknown) {
-  const response = await fetch('/api/v1/' + path, { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
-  if (response.status === 204) return null;
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
-  return body;
-}
-const pretty = (value: unknown) => JSON.stringify(value, null, 2);
-function JsonCreate({ title, path, initial, refresh }: { title: string; path: string; initial: Row; refresh: () => void }) {
-  const [open, setOpen] = useState(false), [value, setValue] = useState(pretty(initial)), [busy, setBusy] = useState(false);
-  return <><Button onClick={() => setOpen(true)}>{title}</Button><Modal title={title} open={open} confirmLoading={busy} onCancel={() => setOpen(false)} onOk={async () => { setBusy(true); try { const result = await api(path, 'POST', JSON.parse(value)); setOpen(false); refresh(); if (result?.token) Modal.info({ title: 'Copy enrollment token now', content: <Typography.Paragraph copyable>{result.token}</Typography.Paragraph> }); else message.success('Saved'); } catch (e) { message.error(String(e)); } finally { setBusy(false); } }}><Input.TextArea aria-label={title + ' JSON'} rows={18} value={value} onChange={e => setValue(e.target.value)} /></Modal></>;
-}
-function DataTable({ rows, action }: { rows: Row[]; action?: (row: Row) => React.ReactNode }) {
-  const keys = [...new Set(rows.flatMap(row => Object.keys(row)))];
-  return <Table size="small" scroll={{ x: true }} rowKey={r => String(r.id || r.source_id || pretty(r))} dataSource={rows} columns={[...keys.map(key => ({ title: key.replace(/_/g, ' '), dataIndex: key, render: (v: unknown) => typeof v === 'object' ? <details><summary>View</summary><pre>{pretty(v)}</pre></details> : String(v ?? '—') })), ...(action ? [{ title: 'Actions', key: 'actions', render: (_: unknown, row: Row) => action(row) }] : [])]} />;
-}
-function Detail({ device, user, back }: { device: Row; user: Row; back: () => void }) {
-  const [sources, setSources] = useState<Row[]>([]), [history, setHistory] = useState<Row[]>([]), [source, setSource] = useState(''), [field, setField] = useState(''), [error, setError] = useState('');
-  const refresh = () => api(`devices/${device.id}/snapshots`).then(setSources).catch(e => setError(String(e)));
-  useEffect(() => { refresh(); const timer = setInterval(refresh, 30000); return () => clearInterval(timer); }, [device.id]);
-  useEffect(() => { if (source) api(`devices/${device.id}/history?source=${encodeURIComponent(source)}`).then(setHistory).catch(e => setError(String(e))); }, [source]);
-  const remote = async (protocol: string, portForward = false) => { try { const session = await api('sessions', 'POST', { device_id: device.id, protocol }); if (!portForward) { Modal.success({ title: 'Remote session authorized', content: <a target="_blank" rel="noreferrer" href={session.launch_url}>Open remote session</a> }); return; } const keyPath = `/tmp/xnet-rms-${device.id}.key`; const command = `ssh -o ProxyCommand=\"./rms-proxy '${session.launch_url}'\" -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa -o StrictHostKeyChecking=accept-new -i ${keyPath} -N -L 18080:127.0.0.1:80 root@xnet-rms-router`; Modal.info({ title: 'LuCI TCP tunnel', width: 760, content: <Space direction="vertical" style={{ width: '100%' }}><Typography.Paragraph>Save the one-time private key, build <Typography.Text code>backend/cmd/proxy</Typography.Text> as <Typography.Text code>rms-proxy</Typography.Text>, then run the SSH command below. Open LuCI at <Typography.Text code>http://127.0.0.1:18080</Typography.Text>.</Typography.Paragraph><Typography.Paragraph copyable={{ text: session.private_key }} code>{session.private_key}</Typography.Paragraph><Typography.Paragraph copyable={{ text: command }} code>{command}</Typography.Paragraph></Space> }); } catch (e) { message.error(String(e)); } };
-  const fields = sources.find(s => s.source_id === source)?.fields || {};
-  return <Space direction="vertical" size="large" style={{ width: '100%' }}><Button onClick={back}>Back to fleet</Button><Typography.Title level={2}>{device.serial_number}</Typography.Title><Typography.Text type="secondary">{device.model} · {device.id}</Typography.Text>{error && <Alert type="error" message={error} />}<Space wrap>{user.role !== 'VIEWER' && <><Button onClick={() => remote('SSH_LUCI')}>Open LuCI</Button><Button onClick={() => remote('TERMINAL_SSH')}>Open terminal</Button><Button onClick={() => remote('TERMINAL_SSH', true)}>LuCI TCP tunnel</Button></>}{user.role === 'SUPER_ADMIN' && <><JsonCreate title="Assign monitoring profile" path={`devices/${device.id}/profiles`} initial={{ profile_id: '', version: 1 }} refresh={refresh} /><Button danger onClick={() => Modal.confirm({ title: 'Revoke this router’s access?', onOk: () => api(`devices/${device.id}/revoke`, 'POST', {}).then(back) })}>Revoke device</Button></>}</Space>{sources.length === 0 && <Alert message="No collected snapshots yet. Assign a profile and wait for collection." />}{sources.map(s => <Card key={s.source_id} title={s.definition.name} extra={<Tag color={s.status === 'ok' ? 'green' : 'red'}>{s.status}</Tag>}><p>Observed {new Date(s.observed_at).toLocaleString()} · {Date.now() - Date.parse(s.observed_at) > s.definition.interval_seconds * 2000 ? 'Stale' : 'Fresh'} · Discarded snapshots: {s.dropped}</p>{s.error && <Alert type="error" message={s.error} />}<DataTable rows={Object.entries(s.fields).map(([id, value]) => ({ id, ...(value as Row) }))} /><details><summary>Raw JSON</summary><pre>{pretty(s.data)}</pre></details></Card>)}<Card title="Source history"><Space wrap><Select aria-label="History source" placeholder="Select source" style={{ width: 220 }} value={source || undefined} onChange={v => { setSource(v); setField(''); }} options={sources.map(s => ({ value: s.source_id, label: s.definition.name }))} /><Select aria-label="Chart field" placeholder="Select numeric field" style={{ width: 240 }} value={field || undefined} onChange={setField} options={Object.entries(fields).filter(([, v]) => ['gauge', 'counter'].includes((v as Row).kind)).map(([id, v]) => ({ value: id, label: (v as Row).label }))} /></Space>{field && <ResponsiveContainer width="100%" height={260}><LineChart data={[...history].reverse().map(h => ({ time: new Date(h.observed_at).toLocaleString(), value: h.fields[field]?.value }))}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="time" hide /><YAxis /><Tooltip /><Line dataKey="value" connectNulls={false} dot={false} /></LineChart></ResponsiveContainer>}<DataTable rows={history} /></Card></Space>;
-}
+import {
+  AuditRecord,
+  CollectorBundle,
+  DashboardStats,
+  Device,
+  EnrollmentToken,
+  Organization,
+  PendingDevice,
+  Profile,
+  Registration,
+  SessionItem,
+  TagItem,
+  User,
+} from './types';
+import { api, formatApiError, ApiError } from './api';
+
+// Components
+import Navbar from './components/Navbar';
+import Sidebar from './components/Sidebar';
+import StatsBar from './components/StatsBar';
+import DeviceList from './components/DeviceList';
+import DeviceDetail from './components/DeviceDetail';
+import AddDevices from './components/AddDevices';
+import AvailableToClaim from './components/AvailableToClaim';
+import RegistrationRequests from './components/RegistrationRequests';
+import TagsManager from './components/TagsManager';
+import SessionsManager from './components/SessionsManager';
+import AdminViews from './components/AdminViews';
+import Login from './Login';
+
 export default function App() {
-  const [user, setUser] = useState<Row | null>(null), [loading, setLoading] = useState(true), [view, setView] = useState('devices'), [rows, setRows] = useState<Row[]>([]), [stats, setStats] = useState<Row>({}), [device, setDevice] = useState<Row | null>(null), [error, setError] = useState(''), [page, setPage] = useState(1), [total, setTotal] = useState(0), [query, setQuery] = useState(''), [filter, setFilter] = useState({ source: '', field: '', value: '', tag: '' });
-  useEffect(() => { api('auth/me').then(setUser).catch(() => setUser(null)).finally(() => setLoading(false)); }, []);
-  const refresh = async () => { if (!user || view === 'onboarding') return; try { const params = new URLSearchParams({ page: String(page), q: query, ...filter }); const data = await api(view === 'devices' ? `devices?${params}` : view); setRows(view === 'devices' ? data.items : data); if (view === 'devices') { setTotal(data.total); setStats(await api('dashboard')); } setError(''); } catch (e) { setError(String(e)); } };
-  useEffect(() => { refresh(); const timer = setInterval(refresh, 30000); return () => clearInterval(timer); }, [user, view, page, query, filter]);
-  if (loading) return <p>Loading account…</p>;
-  if (!user) return <main className="login"><Card title="XNET RMS"><p>Sign in to monitor your fleet.</p><Form layout="vertical" onFinish={async values => { try { const result = await api('auth/login', 'POST', values); setUser(result.user); setError(''); } catch (e) { setError(String(e)); } }}><Form.Item name="email" label="Email" rules={[{ required: true, type: 'email' }]}><Input autoComplete="username" /></Form.Item><Form.Item name="password" label="Password" rules={[{ required: true }]}><Input.Password autoComplete="current-password" /></Form.Item>{error && <Alert type="error" message={error} />}<Button htmlType="submit" type="primary">Sign in</Button></Form></Card></main>;
-  const superAdmin = user.role === 'SUPER_ADMIN', admin = superAdmin || user.role === 'ORG_ADMIN';
-  const nav = [{ key: 'devices', label: 'Device fleet' }, { key: 'profiles', label: 'Monitoring profiles' }, ...(user.role !== 'VIEWER' ? [{ key: 'sessions', label: 'Remote sessions' }] : []), ...(admin ? [{ key: 'onboarding', label: 'Add devices' }, { key: 'users', label: 'Users' }, { key: 'enrollment-tokens', label: 'Enrollment' }, { key: 'audit-logs', label: 'Audit records' }] : []), ...(superAdmin ? [{ key: 'organizations', label: 'Customers' }, { key: 'bundles', label: 'Collector bundles' }] : [])];
-  const remove = async (path: string, method = 'DELETE') => { try { await api(path, method, method === 'POST' ? {} : undefined); refresh(); } catch (e) { message.error(String(e)); } };
-  const customColumns = [...new Set(rows.flatMap(d => (d.sources || []).flatMap((s: Row) => Object.keys(s.fields || {}).map(f => `${s.source_id}|${f}`))))].slice(0, 32).map(key => { const [source, field] = key.split('|'); return { title: rows.flatMap(d => d.sources || []).find((s: Row) => s.source_id === source && s.fields[field])?.fields[field]?.label || field, key, render: (_: unknown, d: Row) => { const s = d.sources?.find((v: Row) => v.source_id === source); const v = s?.fields[field]; return v ? <span title={s.stale ? 'Stale source' : s.status}>{String(v.value)} {v.unit} {s.stale ? ' (stale)' : ''}</span> : '—'; } }; });
-  return <Layout style={{ minHeight: '100vh' }}><Layout.Sider width={220} breakpoint="lg" collapsedWidth={0}><h1 className="brand">XNET RMS</h1><Menu theme="dark" selectedKeys={[view]} items={nav} onClick={e => { setView(e.key); setDevice(null); setRows([]); }} /></Layout.Sider><Layout><Layout.Header className="rms-header"><span>{user.email} · {user.role}</span><Button onClick={async () => { await api('auth/logout', 'POST'); setUser(null); setDevice(null); }}>Sign out</Button></Layout.Header><Layout.Content style={{ padding: 28 }}>{error && <Alert type="error" message={error} showIcon />}{device ? <Detail device={device} user={user} back={() => { setDevice(null); refresh(); }} /> : <><Typography.Title level={2}>{nav.find(n => n.key === view)?.label}</Typography.Title><Space wrap style={{ marginBottom: 20 }}>{view === 'organizations' && <JsonCreate title="Create customer" path={view} initial={{ name: '' }} refresh={refresh} />}{view === 'users' && <JsonCreate title="Create user" path={view} initial={{ email: '', password: '', role: 'VIEWER', organization_id: user.organization_id }} refresh={refresh} />}{view === 'enrollment-tokens' && <JsonCreate title="Create enrollment token" path={view} initial={{ name: '', organization_id: user.organization_id, max_uses: 1, expires_at: null, ...(superAdmin ? { token: '' } : {}) }} refresh={refresh} />}{view === 'profiles' && superAdmin && <JsonCreate title="Create profile version" path={view} initial={{ version: 1, name: '', source_id: 'system', type: 'ubus', object: 'system', method: 'info', interval_seconds: 60, timeout_seconds: 5, max_output_bytes: 32768, fields: [{ id: 'uptime', path: '/uptime', label: 'Uptime', unit: 's', kind: 'counter' }] }} refresh={refresh} />}{view === 'bundles' && <JsonCreate title="Sign and publish collector bundle" path={view} initial={{ version: 1, script: '#!/bin/sh\nprintf \'{"status":"unsupported"}\\n\'\nexit 2\n' }} refresh={refresh} />}<Button onClick={refresh}>Refresh</Button></Space>{view === 'onboarding' ? <Onboarding user={user} /> : view === 'devices' ? <><Space size="large" wrap>{Object.entries(stats).map(([key, value]) => <Card key={key}><Statistic title={key} value={value} /></Card>)}</Space><Space wrap style={{ margin: '20px 0' }}><Input placeholder="Filter by tag" value={filter.tag} onChange={e => { setFilter({ ...filter, tag: e.target.value }); setPage(1); }} /><Input.Search placeholder="Search serial number" allowClear onSearch={v => { setQuery(v); setPage(1); }} /><Input placeholder="Source ID" value={filter.source} onChange={e => setFilter({ ...filter, source: e.target.value })} /><Input placeholder="Field ID" value={filter.field} onChange={e => setFilter({ ...filter, field: e.target.value })} /><Input placeholder="Exact value" value={filter.value} onChange={e => setFilter({ ...filter, value: e.target.value })} /></Space><Table rowKey="id" scroll={{ x: true }} dataSource={rows} pagination={{ current: page, total, pageSize: 100, showSizeChanger: false, onChange: setPage }} columns={[{ title: 'Device', dataIndex: 'serial_number', render: (v, d) => <Button type="link" onClick={() => setDevice(d)}>{v}</Button> }, { title: 'Name', dataIndex: 'name' }, { title: 'LAN MAC', dataIndex: 'lan_mac' }, { title: 'Tags', render: (_, d) => d.tags?.map((t: string) => <Tag key={t}>{t}</Tag>) }, { title: 'Model', dataIndex: 'model' }, { title: 'Connectivity', dataIndex: 'status', render: v => <Tag color={v === 'ONLINE' ? 'green' : 'default'}>{v}</Tag> }, ...customColumns]} /></> : <DataTable rows={rows} action={view === 'sessions' ? r => <Button onClick={() => remove(`sessions/${r.id}`)}>Close</Button> : view === 'enrollment-tokens' ? r => <Button disabled={r.revoked} onClick={() => remove(`enrollment-tokens/${r.id}`)}>Revoke</Button> : view === 'users' ? r => <Button disabled={r.disabled || r.id === user.id} onClick={() => remove(`users/${r.id}/disable`, 'POST')}>Disable</Button> : undefined} />}</>}</Layout.Content></Layout></Layout>;
+  const [user, setUser] = useState<User | null>(null);
+  const [loadingUser, setLoadingUser] = useState(true);
+
+  // Active navigation view
+  const [view, setView] = useState<string>('dashboard');
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+
+  // Organization scoping
+  const [selectedOrg, setSelectedOrg] = useState<string>('');
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+
+  // Fleet & Device data
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [totalDevices, setTotalDevices] = useState<number>(0);
+  const [page, setPage] = useState<number>(1);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedTag, setSelectedTag] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
+
+  // Auxiliary data
+  const [stats, setStats] = useState<DashboardStats>({ total: 0, online: 0, offline: 0, revoked: 0 });
+  const [pendingDevices, setPendingDevices] = useState<PendingDevice[]>([]);
+  const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [tags, setTags] = useState<TagItem[]>([]);
+  const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [adminData, setAdminData] = useState<any[]>([]);
+
+  // UI state
+  const [loading, setLoading] = useState<boolean>(false);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [globalError, setGlobalError] = useState<string>('');
+
+  // Initial Auth Verification
+  useEffect(() => {
+    api<User>('auth/me')
+      .then(u => {
+        if (u && typeof u === 'object' && u.id && u.role) {
+          setUser(u);
+          if (u.role !== 'SUPER_ADMIN') {
+            setSelectedOrg(u.organization_id);
+          }
+        } else {
+          setUser(null);
+        }
+      })
+      .catch(() => setUser(null))
+      .finally(() => setLoadingUser(false));
+  }, []);
+
+  // Fetch Organizations (for SUPER_ADMIN)
+  useEffect(() => {
+    if (user && user.role === 'SUPER_ADMIN') {
+      api<Organization[]>('organizations')
+        .then(orgs => setOrganizations(orgs || []))
+        .catch(() => {});
+    }
+  }, [user]);
+
+  // Main Data Refresh Function
+  const refreshData = async () => {
+    if (!user) return;
+    setRefreshing(true);
+    setGlobalError('');
+
+    try {
+      const isOrgAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN';
+      const isOperator = isOrgAdmin || user.role === 'OPERATOR';
+
+      // Always fetch dashboard stats and tags
+      const [dashStats, tagList] = await Promise.all([
+        api<DashboardStats>('dashboard').catch(() => ({ total: 0, online: 0, offline: 0, revoked: 0 })),
+        api<TagItem[]>('tags').catch(() => []),
+      ]);
+      setStats(dashStats && typeof dashStats === 'object' ? dashStats : { total: 0, online: 0, offline: 0, revoked: 0 });
+      setTags(Array.isArray(tagList) ? tagList : []);
+
+      // Fetch pending devices and registrations if admin
+      if (isOrgAdmin) {
+        const [pending, regList] = await Promise.all([
+          api<PendingDevice[]>('pending-devices').catch(() => []),
+          api<Registration[]>('registrations').catch(() => []),
+        ]);
+        setPendingDevices(Array.isArray(pending) ? pending : []);
+        setRegistrations(Array.isArray(regList) ? regList : []);
+      }
+
+      // Fetch active sessions if operator
+      if (isOperator) {
+        const sessList = await api<SessionItem[]>('sessions').catch(() => []);
+        setSessions(Array.isArray(sessList) ? sessList : []);
+      }
+
+      // Fetch view-specific dataset
+      if (view === 'devices' || view === 'dashboard') {
+        const params = new URLSearchParams({
+          page: String(page),
+          q: searchQuery,
+          tag: selectedTag,
+        });
+        const res = await api<{ items: Device[]; total: number }>(`devices?${params}`);
+        let items = Array.isArray(res?.items) ? res.items : [];
+        if (statusFilter) {
+          items = items.filter(d => d.status === statusFilter);
+        }
+        setDevices(items);
+        setTotalDevices(statusFilter ? items.length : (res?.total || 0));
+      } else if (['users', 'enrollment-tokens', 'audit-logs', 'organizations', 'profiles', 'bundles'].includes(view)) {
+        const res = await api<any[]>(view);
+        setAdminData(Array.isArray(res) ? res : []);
+      }
+    } catch (err) {
+      const formatted = formatApiError(err);
+      if (err instanceof ApiError && err.status === 401) {
+        setUser(null);
+      } else {
+        setGlobalError(formatted.message);
+      }
+    } finally {
+      setRefreshing(false);
+      setLoading(false);
+    }
+  };
+
+  // Trigger refresh on view, filter, or page change
+  useEffect(() => {
+    if (user) {
+      refreshData();
+    }
+  }, [user, view, page, searchQuery, selectedTag, statusFilter, selectedOrg]);
+
+  // Periodic background refresh every 30 seconds
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(refreshData, 30000);
+    return () => clearInterval(interval);
+  }, [user, view, page, searchQuery, selectedTag, statusFilter, selectedOrg]);
+
+  // Remote LuCI Launcher (Server-Side SSH_LUCI)
+  const handleOpenLuCI = async (dev: Device) => {
+    try {
+      message.loading({ content: `Initiating LuCI session for ${dev.serial_number}...`, key: 'luci' });
+      const session = await api<{ id: string; expires_at: string; launch_url: string }>(
+        'sessions',
+        'POST',
+        { device_id: dev.id, protocol: 'SSH_LUCI' }
+      );
+      message.success({ content: 'LuCI session authorized!', key: 'luci' });
+      window.open(session.launch_url, '_blank');
+      refreshData();
+    } catch (err) {
+      const formatted = formatApiError(err);
+      message.destroy('luci');
+      Modal[formatted.type === 'error' ? 'error' : 'warning']({
+        title: formatted.title,
+        content: formatted.message,
+      });
+    }
+  };
+
+  // Remote Web Terminal Launcher (TERMINAL_SSH)
+  const handleOpenTerminal = async (dev: Device) => {
+    try {
+      message.loading({ content: `Opening terminal for ${dev.serial_number}...`, key: 'term' });
+      const session = await api<{ id: string; expires_at: string; launch_url: string }>(
+        'sessions',
+        'POST',
+        { device_id: dev.id, protocol: 'TERMINAL_SSH' }
+      );
+      message.success({ content: 'Terminal session authorized!', key: 'term' });
+      window.open(session.launch_url, '_blank');
+      refreshData();
+    } catch (err) {
+      const formatted = formatApiError(err);
+      message.destroy('term');
+      Modal.error({
+        title: formatted.title,
+        content: formatted.message,
+      });
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await api('auth/logout', 'POST');
+    } catch {}
+    setUser(null);
+    setSelectedDevice(null);
+  };
+
+  // Unauthenticated: Show NCMS-inspired Login Screen
+  if (loadingUser) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f8fafc' }}>
+        <p style={{ color: '#64748b' }}>Loading XNET RMS...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login onLoginSuccess={setUser} api={api} />;
+  }
+
+  // Count pending devices awaiting claim and registrations awaiting device
+  const awaitingCount = registrations.filter(r => r.status === 'awaiting_device').length;
+  const pendingCount = pendingDevices.length;
+
+  return (
+    <Layout style={{ minHeight: '100vh' }}>
+      <Sidebar
+        user={user}
+        currentView={view}
+        onSelectView={viewKey => {
+          setView(viewKey);
+          setSelectedDevice(null);
+          setPage(1);
+        }}
+        pendingCount={pendingCount}
+        awaitingCount={awaitingCount}
+      />
+
+      <Layout style={{ background: '#f8fafc' }}>
+        <Navbar
+          user={user}
+          organizations={organizations}
+          selectedOrg={selectedOrg}
+          onSelectOrg={orgId => {
+            setSelectedOrg(orgId);
+            setPage(1);
+          }}
+          onRefresh={refreshData}
+          refreshing={refreshing}
+          onSignOut={handleSignOut}
+        />
+
+        <Layout.Content className="rms-content">
+          {globalError && (
+            <Alert
+              type="error"
+              message={globalError}
+              showIcon
+              closable
+              style={{ marginBottom: 20 }}
+              onClose={() => setGlobalError('')}
+            />
+          )}
+
+          {/* If a device is selected, show detail view */}
+          {selectedDevice ? (
+            <DeviceDetail
+              device={selectedDevice}
+              user={user}
+              onBack={() => {
+                setSelectedDevice(null);
+                refreshData();
+              }}
+              onRefreshDevice={refreshData}
+            />
+          ) : (
+            <>
+              {/* Dashboard / Fleet Overview */}
+              {view === 'dashboard' && (
+                <div>
+                  <div className="page-header">
+                    <div>
+                      <h1 className="page-title">Fleet Overview</h1>
+                      <div className="page-subtitle">Real-time status and telemetry of deployed router fleet.</div>
+                    </div>
+                  </div>
+
+                  <StatsBar
+                    stats={stats}
+                    pendingCount={pendingCount}
+                    awaitingCount={awaitingCount}
+                    onSelectFilter={setStatusFilter}
+                    onNavigate={v => setView(v)}
+                  />
+
+                  <DeviceList
+                    user={user}
+                    devices={devices}
+                    total={totalDevices}
+                    page={page}
+                    loading={loading || refreshing}
+                    tags={tags}
+                    searchQuery={searchQuery}
+                    selectedTag={selectedTag}
+                    statusFilter={statusFilter}
+                    onSearchChange={q => {
+                      setSearchQuery(q);
+                      setPage(1);
+                    }}
+                    onTagChange={t => {
+                      setSelectedTag(t);
+                      setPage(1);
+                    }}
+                    onStatusChange={s => {
+                      setStatusFilter(s);
+                      setPage(1);
+                    }}
+                    onPageChange={setPage}
+                    onSelectDevice={setSelectedDevice}
+                    onOpenLuCI={handleOpenLuCI}
+                    onOpenTerminal={handleOpenTerminal}
+                  />
+                </div>
+              )}
+
+              {/* Device Fleet View */}
+              {view === 'devices' && (
+                <div>
+                  <div className="page-header">
+                    <div>
+                      <h1 className="page-title">Device Fleet Inventory</h1>
+                      <div className="page-subtitle">All enrolled routers reporting telemetry to RMS.</div>
+                    </div>
+                  </div>
+
+                  <DeviceList
+                    user={user}
+                    devices={devices}
+                    total={totalDevices}
+                    page={page}
+                    loading={loading || refreshing}
+                    tags={tags}
+                    searchQuery={searchQuery}
+                    selectedTag={selectedTag}
+                    statusFilter={statusFilter}
+                    onSearchChange={q => {
+                      setSearchQuery(q);
+                      setPage(1);
+                    }}
+                    onTagChange={t => {
+                      setSelectedTag(t);
+                      setPage(1);
+                    }}
+                    onStatusChange={s => {
+                      setStatusFilter(s);
+                      setPage(1);
+                    }}
+                    onPageChange={setPage}
+                    onSelectDevice={setSelectedDevice}
+                    onOpenLuCI={handleOpenLuCI}
+                    onOpenTerminal={handleOpenTerminal}
+                  />
+                </div>
+              )}
+
+              {/* Add Devices */}
+              {view === 'add-devices' && (
+                <AddDevices
+                  user={user}
+                  organizations={organizations}
+                  tags={tags}
+                  selectedOrg={selectedOrg}
+                  onSuccess={() => {
+                    refreshData();
+                    setView('registration-requests');
+                  }}
+                  onRefreshTags={refreshData}
+                />
+              )}
+
+              {/* Available to Claim */}
+              {view === 'available-to-claim' && (
+                <AvailableToClaim
+                  user={user}
+                  pendingDevices={pendingDevices}
+                  loading={loading || refreshing}
+                  tags={tags}
+                  selectedOrg={selectedOrg}
+                  onRefresh={refreshData}
+                />
+              )}
+
+              {/* Registration Requests */}
+              {view === 'registration-requests' && (
+                <RegistrationRequests
+                  user={user}
+                  registrations={registrations}
+                  loading={loading || refreshing}
+                  tags={tags}
+                  selectedOrg={selectedOrg}
+                  onRefresh={refreshData}
+                />
+              )}
+
+              {/* Customer Tags */}
+              {view === 'tags' && (
+                <TagsManager
+                  user={user}
+                  tags={tags}
+                  organizations={organizations}
+                  selectedOrg={selectedOrg}
+                  loading={loading || refreshing}
+                  onRefresh={refreshData}
+                />
+              )}
+
+              {/* Remote Sessions */}
+              {view === 'sessions' && (
+                <SessionsManager
+                  user={user}
+                  sessions={sessions}
+                  devices={devices}
+                  loading={loading || refreshing}
+                  onRefresh={refreshData}
+                />
+              )}
+
+              {/* Admin Views */}
+              {['users', 'enrollment-tokens', 'organizations', 'profiles', 'bundles', 'audit-logs'].includes(view) && (
+                <AdminViews
+                  view={view}
+                  currentUser={user}
+                  data={adminData}
+                  organizations={organizations}
+                  selectedOrg={selectedOrg}
+                  loading={loading || refreshing}
+                  onRefresh={refreshData}
+                />
+              )}
+            </>
+          )}
+        </Layout.Content>
+      </Layout>
+    </Layout>
+  );
 }

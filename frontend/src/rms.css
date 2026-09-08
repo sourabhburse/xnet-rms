@@ -1,1 +1,474 @@
-body{margin:0} .brand{color:white;padding:20px;font-size:20px}.rms-header{display:flex;align-items:center;justify-content:space-between;background:white;padding:0 28px;gap:20px}.login{max-width:420px;margin:12vh auto;padding:20px}pre{max-width:700px;max-height:400px;overflow:auto;white-space:pre-wrap;word-break:break-word}.ant-space{max-width:100%}
+/* Reset & Base */
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #f8fafc;
+  color: #0f172a;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Teltonika RMS Header */
+.rms-navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+  padding: 0 24px;
+  height: 60px;
+  line-height: 60px;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.rms-nav-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.rms-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: #f1f5f9;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+
+/* Teltonika RMS Sider */
+.rms-sider {
+  background: #0f172a !important;
+  border-right: 1px solid #1e293b;
+  min-height: 100vh;
+  box-shadow: 2px 0 8px 0 rgba(0, 0, 0, 0.05);
+}
+
+.rms-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  height: 60px;
+  background: #090d16;
+  border-bottom: 1px solid #1e293b;
+}
+
+.rms-brand img {
+  height: 28px;
+  width: auto;
+}
+
+.rms-brand h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: 0.5px;
+}
+
+.rms-brand span {
+  font-size: 11px;
+  font-weight: 600;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+
+/* Teltonika RMS Sider Menu */
+.rms-sider .ant-menu {
+  background: transparent !important;
+  border-right: none;
+  padding-top: 8px;
+}
+
+.rms-sider .ant-menu-item {
+  margin: 4px 12px !important;
+  width: calc(100% - 24px) !important;
+  border-radius: 6px !important;
+  color: #94a3b8 !important;
+  font-weight: 500;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  transition: all 0.15s ease-in-out;
+}
+
+.rms-sider .ant-menu-item:hover {
+  color: #f8fafc !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.rms-sider .ant-menu-item-selected {
+  background: #0284c7 !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: 0 2px 4px 0 rgba(2, 132, 199, 0.3);
+}
+
+.rms-sider .ant-menu-item-group-title {
+  color: #64748b !important;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 14px 20px 6px 20px !important;
+}
+
+/* Content Area */
+.rms-content {
+  padding: 24px 28px;
+  background: #f8fafc;
+  min-height: calc(100vh - 60px);
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.page-title {
+  margin: 0 !important;
+  font-size: 20px !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+}
+
+.page-subtitle {
+  color: #64748b;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+/* Teltonika Status Pills */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  border: 1px solid transparent;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-online {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.status-online .status-dot {
+  background: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+.status-offline {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
+.status-offline .status-dot {
+  background: #94a3b8;
+}
+
+.status-awaiting {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.status-awaiting .status-dot {
+  background: #f59e0b;
+}
+
+.status-pending {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  color: #5b21b6;
+}
+
+.status-pending .status-dot {
+  background: #8b5cf6;
+}
+
+.status-revoked {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.status-revoked .status-dot {
+  background: #ef4444;
+}
+
+/* Stats Overview Cards */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 16px 20px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.03);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.stat-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.stat-card-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* Teltonika Card Container */
+.rms-card {
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+  margin-bottom: 20px;
+}
+
+.rms-card-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rms-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0;
+}
+
+/* Tables */
+.rms-table .ant-table-thead > tr > th {
+  background: #f8fafc !important;
+  color: #475569 !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-bottom: 1px solid #e2e8f0 !important;
+  padding: 12px 16px !important;
+}
+
+.rms-table .ant-table-tbody > tr > td {
+  padding: 12px 16px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.rms-table .ant-table-tbody > tr:hover > td {
+  background: #f8fafc !important;
+}
+
+.code-font {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* Filter Bar */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+/* Auth / Login Page styling inspired by NCMS */
+.auth-body {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  background-color: #f9fafb;
+  background-image: url('/images/login_back.png');
+  background-size: cover;
+  background-position: left center;
+  background-repeat: no-repeat;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.auth-shell {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 3rem 10vw;
+  box-sizing: border-box;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 23rem;
+  padding: 2.75rem 2.5rem;
+  border-radius: 1rem;
+  background: #ffffff;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+  box-sizing: border-box;
+}
+
+.auth-logo {
+  height: 2.75rem;
+  max-width: 100%;
+  margin-bottom: 1rem;
+  display: block;
+  object-fit: contain;
+}
+
+.auth-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #374151;
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  line-height: 1.4;
+}
+
+/* Rounded Pill Inputs */
+.auth-input-pill,
+.auth-input-pill.ant-input,
+.auth-input-pill.ant-input-affix-wrapper {
+  border-radius: 9999px !important;
+  padding: 8px 18px !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
+  border: 1px solid #83b7e8 !important;
+  background: #ffffff !important;
+  color: #374151 !important;
+  transition: all 0.2s ease-in-out;
+}
+
+.auth-input-pill.ant-input-affix-wrapper input {
+  font-size: 14px !important;
+  color: #374151 !important;
+}
+
+.auth-input-pill:hover,
+.auth-input-pill.ant-input-affix-wrapper:hover {
+  border-color: #066fd1 !important;
+}
+
+.auth-input-pill:focus,
+.auth-input-pill-focused,
+.auth-input-pill.ant-input-affix-wrapper-focused {
+  border-color: #066fd1 !important;
+  box-shadow: 0 0 0 3px rgba(6, 111, 209, 0.18) !important;
+}
+
+.auth-input-pill input::placeholder,
+.auth-input-pill::placeholder {
+  color: #9ca3af !important;
+}
+
+/* Checkbox */
+.auth-checkbox {
+  color: #4b5563;
+  font-size: 14px;
+}
+
+/* Rounded Pill Button */
+.auth-btn-pill {
+  background-color: #066fd1 !important;
+  border-color: #066fd1 !important;
+  border-radius: 9999px !important;
+  height: 42px !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: #f9fafb !important;
+  box-shadow: none !important;
+  transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+
+.auth-btn-pill:hover,
+.auth-btn-pill:focus {
+  background-color: #0558a7 !important;
+  border-color: #0558a7 !important;
+  color: #ffffff !important;
+}
+
+.auth-btn-pill:active {
+  background-color: #044686 !important;
+  border-color: #044686 !important;
+}
+
+/* Responsive Overrides */
+@media (max-width: 1024px) {
+  .rms-content {
+    padding: 16px 18px;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .rms-navbar {
+    padding: 0 14px;
+  }
+  .auth-shell {
+    justify-content: center;
+    padding: 1.5rem;
+  }
+  .auth-card {
+    max-width: 26rem;
+    padding: 2rem 1.5rem;
+  }
+}
