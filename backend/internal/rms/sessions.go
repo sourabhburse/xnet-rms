@@ -32,7 +32,7 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 	if !body(w, r, &req) {
 		return
 	}
-	if req.Protocol != "HTTP_LUCI" && req.Protocol != "TERMINAL_SSH" {
+	if req.Protocol != "HTTP_LUCI" && req.Protocol != "SSH_LUCI" && req.Protocol != "TERMINAL_SSH" {
 		fail(w, 400, "protocol outside release 1")
 		return
 	}
@@ -83,7 +83,7 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 	var pubSSH string
 	var privPEM []byte
-	if req.Protocol == "TERMINAL_SSH" {
+	if req.Protocol == "TERMINAL_SSH" || req.Protocol == "SSH_LUCI" {
 		var err error
 		privPEM, pubSSH, _, err = generateSSHKeypair(id)
 		if err != nil {
@@ -107,7 +107,7 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 		"expires_at": expires,
 		"launch_url": "https://" + id + "." + s.Config.TunnelDomain + ":" + s.Config.TunnelPort + "/launch?ticket=" + ticket,
 	}
-	if len(privPEM) > 0 {
+	if len(privPEM) > 0 && req.Protocol == "TERMINAL_SSH" {
 		resp["private_key"] = string(privPEM)
 	}
 	output(w, 201, resp)

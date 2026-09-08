@@ -15,7 +15,7 @@ void handle_mqtt_message(const struct mosquitto_message *msg){
    const char *id=json_object_get_string(o,"session_id"),*protocol=json_object_get_string(o,"protocol"),*url=json_object_get_string(o,"gateway_url");
    const char *pubkey=json_object_get_string(o,"public_key");
    double exp=json_object_get_number(o,"expires_at");time_t now=time(NULL);
-   if(rms_id(id)&&protocol&&url&&!strncmp(url,"https://",8)&&exp>now&&exp<=now+900&&(strcmp(protocol,"HTTP_LUCI")==0||strcmp(protocol,"TERMINAL_SSH")==0))open_reverse_tunnel(id,protocol,url,(int)(exp-now),pubkey);
+   if(rms_id(id)&&protocol&&url&&!strncmp(url,"https://",8)&&exp>now&&exp<=now+900&&(strcmp(protocol,"HTTP_LUCI")==0||strcmp(protocol,"SSH_LUCI")==0||strcmp(protocol,"TERMINAL_SSH")==0))open_reverse_tunnel(id,protocol,url,(int)(exp-now),pubkey);
   }
  json_value_free(v);
 }

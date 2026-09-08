@@ -35,10 +35,149 @@ type Pair struct {
 	responses           chan []byte
 	done                chan struct{}
 	once                sync.Once
+	sshOnce             sync.Once
+	luciReadyOnce       sync.Once
+	sshClient           *ssh.Client
+	sshTransport        *http.Transport
+	sshErr              error
+	luciCookie          string
+	luciReady           chan struct{}
 	initial             []byte
 	routerIn            *io.PipeReader
 	routerOut           *io.PipeWriter
 }
+
+func (g *Gateway) ensureLuciSSH(p *Pair) error {
+	p.sshOnce.Do(func() {
+		signer, err := ssh.ParsePrivateKey([]byte(p.session.SSHPrivateKey))
+		if err != nil {
+			p.sshErr = err
+			return
+		}
+		pr, pw := io.Pipe()
+		p.mu.Lock()
+		initial := p.initial
+		p.initial = nil
+		p.routerIn, p.routerOut = pr, pw
+		p.mu.Unlock()
+		conn := &wsNetConn{r: io.MultiReader(bytes.NewReader(initial), pr), p: p}
+		cfg := &ssh.ClientConfig{
+			User:            "root",
+			Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			HostKeyAlgorithms: []string{
+				ssh.KeyAlgoRSA,
+				ssh.KeyAlgoRSASHA256,
+				ssh.KeyAlgoRSASHA512,
+				ssh.KeyAlgoED25519,
+			},
+			Timeout: 10 * time.Second,
+		}
+		ncc, chans, reqs, err := ssh.NewClientConn(conn, "127.0.0.1:22", cfg)
+		if err != nil {
+			p.sshErr = err
+			return
+		}
+		client := ssh.NewClient(ncc, chans, reqs)
+		transport := &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return client.Dial("tcp", "127.0.0.1:80")
+			},
+			MaxIdleConns:        8,
+			MaxIdleConnsPerHost: 8,
+			IdleConnTimeout:     30 * time.Second,
+		}
+		p.mu.Lock()
+		p.sshClient, p.sshTransport = client, transport
+		p.mu.Unlock()
+	})
+	return p.sshErr
+}
+
+func isLuciStatic(path string) bool {
+	if strings.HasPrefix(path, "/luci-static/") {
+		return true
+	}
+	for _, ext := range []string{".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf"} {
+		if strings.HasSuffix(strings.ToLower(path), ext) {
+			return true
+		}
+	}
+	return false
+}
+
+func copyLuciResponseHeaders(dst, src http.Header) {
+	for k, values := range src {
+		switch strings.ToLower(k) {
+		case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
+			continue
+		}
+		for _, value := range values {
+			dst.Add(k, value)
+		}
+	}
+}
+
+func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pair) {
+	if err := g.ensureLuciSSH(p); err != nil {
+		log.Printf("rms tunnel session %s LuCI SSH setup failed: %v", id, err)
+		fail(w, 502, "router SSH unavailable")
+		return
+	}
+	select {
+	case <-p.luciReady:
+	case <-p.done:
+		fail(w, 502, "session closed")
+		return
+	case <-time.After(5 * time.Second):
+		fail(w, 502, "LuCI authorization unavailable")
+		return
+	}
+	p.mu.Lock()
+	cookie, transport := p.luciCookie, p.sshTransport
+	p.mu.Unlock()
+	if cookie == "" || transport == nil {
+		fail(w, 502, "LuCI authorization unavailable")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
+	path := r.URL.RequestURI()
+	if path == "/" {
+		path = "/cgi-bin/luci/"
+	}
+	out := r.Clone(r.Context())
+	out.URL = &url.URL{Scheme: "http", Host: "127.0.0.1", Path: path}
+	if q := strings.IndexByte(path, '?'); q >= 0 {
+		out.URL.Path, out.URL.RawQuery = path[:q], path[q+1:]
+	}
+	out.RequestURI = ""
+	out.Host = "127.0.0.1"
+	out.Header = r.Header.Clone()
+	out.Header.Set("Cookie", "sysauth="+cookie+"; sysauth_http="+cookie)
+	out.Header.Del("Connection")
+	resp, err := transport.RoundTrip(out)
+	if err != nil {
+		log.Printf("rms tunnel session %s LuCI request failed path=%s: %v", id, r.URL.Path, err)
+		fail(w, 502, "router LuCI unavailable")
+		return
+	}
+	defer resp.Body.Close()
+	copyLuciResponseHeaders(w.Header(), resp.Header)
+	if isLuciStatic(path) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	if location := w.Header().Get("Location"); location != "" {
+		u, err := url.Parse(location)
+		if err == nil && u.IsAbs() && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost") {
+			w.Header().Set("Location", u.RequestURI())
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, io.LimitReader(resp.Body, 1024*1024))
+}
+
 type HTTPFrame struct {
 	Method  string            `json:"method"`
 	Path    string            `json:"path"`
@@ -82,6 +221,12 @@ func (g *Gateway) close(id string, p *Pair) {
 		log.Printf("rms tunnel session %s closing", id)
 		close(p.done)
 		p.mu.Lock()
+		if p.sshTransport != nil {
+			p.sshTransport.CloseIdleConnections()
+		}
+		if p.sshClient != nil {
+			p.sshClient.Close()
+		}
 		if p.routerOut != nil {
 			p.routerOut.Close()
 		}
@@ -187,6 +332,15 @@ func (g *Gateway) Handler() http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if session.Protocol == "SSH_LUCI" {
+			if p == nil {
+				w.Header().Set("Retry-After", "2")
+				fail(w, 503, "router connecting; retry shortly")
+				return
+			}
+			g.luci(w, r, id, p)
+			return
+		}
 		if session.Protocol == "TERMINAL_SSH" {
 			if r.URL.Path == "/ws" {
 				if p == nil {
@@ -219,7 +373,7 @@ func (g *Gateway) Handler() http.Handler {
 			w.Write(data)
 			return
 		}
-		if p == nil && session.Protocol == "HTTP_LUCI" {
+		if p == nil && (session.Protocol == "HTTP_LUCI" || session.Protocol == "SSH_LUCI") {
 			// The browser follows /launch immediately. Give the router's
 			// outbound WebSocket a short, bounded window to attach so LuCI
 			// does not fail its first document request during normal MQTT
@@ -264,7 +418,7 @@ func (g *Gateway) router(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(2 * 1024 * 1024)
-	p := &Pair{session: session, router: conn, responses: make(chan []byte, 1), done: make(chan struct{})}
+	p := &Pair{session: session, router: conn, responses: make(chan []byte, 1), done: make(chan struct{}), luciReady: make(chan struct{})}
 	g.pairs[id] = p
 	go g.readRouter(id, p)
 	go func() {
@@ -338,7 +492,7 @@ func (c *wsNetConn) SetWriteDeadline(t time.Time) error { return nil }
 func (g *Gateway) readRouter(id string, p *Pair) {
 	defer g.close(id, p)
 	for {
-		_, b, e := p.router.ReadMessage()
+		kind, b, e := p.router.ReadMessage()
 		if e != nil {
 			return
 		}
@@ -351,6 +505,19 @@ func (g *Gateway) readRouter(id string, p *Pair) {
 				return
 			}
 		} else {
+			if p.session.Protocol == "SSH_LUCI" && kind == websocket.TextMessage {
+				var control struct {
+					Type   string `json:"type"`
+					Cookie string `json:"cookie"`
+				}
+				if json.Unmarshal(b, &control) == nil && control.Type == "luci_session" && validID(control.Cookie) {
+					p.mu.Lock()
+					p.luciCookie = control.Cookie
+					p.mu.Unlock()
+					p.luciReadyOnce.Do(func() { close(p.luciReady) })
+				}
+				continue
+			}
 			var out *io.PipeWriter
 			p.mu.Lock()
 			if p.routerOut != nil {

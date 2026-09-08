@@ -83,7 +83,7 @@ int open_reverse_tunnel(const char *id,const char *protocol,const char *url,int 
      * start immediately after the browser closes. */
     check_reverse_tunnel();
     if(running||!rms_id(id)||seconds<1||seconds>900)return -1;
-    if(!strcmp(protocol, "TERMINAL_SSH")) {
+    if(!strcmp(protocol, "TERMINAL_SSH") || !strcmp(protocol, "SSH_LUCI")) {
         if (!public_key || rms_ssh_inject_key(id, public_key) != 0) return -1;
     }
     pid_t pid=fork();
