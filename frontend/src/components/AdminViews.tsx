@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Button,
@@ -61,6 +61,10 @@ export default function AdminViews({
   const [customerForm, setCustomerForm] = useState({ name: '' });
   const [rawJsonForm, setRawJsonForm] = useState('');
   const [createdTokenNotice, setCreatedTokenNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectedOrg) setTargetOrg(selectedOrg);
+  }, [selectedOrg]);
 
   const openCreateModal = () => {
     setModalOpen(true);

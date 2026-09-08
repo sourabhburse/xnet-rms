@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Button,
@@ -65,6 +65,10 @@ export default function AddDevices({
   const [csvPreview, setCsvPreview] = useState<any[]>([]);
   const [csvValidating, setCsvValidating] = useState(false);
   const [formError, setFormError] = useState<string>('');
+
+  useEffect(() => {
+    if (selectedOrg) setOrg(selectedOrg);
+  }, [selectedOrg]);
 
   const availableTags = (tags || []).filter(t => !org || t.organization_id === org);
   const tagOptions = availableTags.map(t => ({ label: t.name, value: t.name }));

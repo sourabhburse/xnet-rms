@@ -196,45 +196,48 @@ body, #root { background: var(--rms-page); }
   .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* Dark operations layout inspired by modern network-management consoles. */
-body, #root { color: #edf2f8; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.rms-sider { background: #1b1f26 !important; }
-.rms-brand { background: #1b1f26; }
-.rms-navbar { background: #242931; border-bottom-color: #3a424f; box-shadow: none; }
-.rms-nav-left .anticon { color: #9aa7b9; }
-.rms-navbar .ant-select-selector, .rms-navbar .ant-select-selection-item, .rms-navbar .ant-select-arrow { background: #2a3039 !important; border-color: #46505f !important; color: #edf2f8 !important; }
-.rms-navbar .ant-select-selection-placeholder { color: #a5b0c0 !important; }
-.user-badge { color: #d9e1ec; }
-.user-badge .ant-tag { background: rgba(77,141,255,.18) !important; border-color: rgba(112,162,255,.35) !important; color: #9fc2ff !important; }
-.rms-navbar .ant-btn { background: transparent; border-color: #46505f; color: #d6deea; }
-.rms-navbar .ant-btn:hover { background: #303743; border-color: #617087; color: #fff; }
-.rms-navbar .ant-btn-dangerous { border-color: transparent; color: #b7c1d0 !important; }
-.rms-navbar .ant-btn-dangerous:hover { background: #303743; color: #fff !important; }
-.rms-content { background: #20242b; }
-.page-title { color: #f5f7fb !important; }
-.page-subtitle { color: #98a6b8; }
-.stat-card { background: #282e37; border-color: #3b4553; box-shadow: none; }
-.stat-card:hover { background: #2c333e; border-color: #5b78aa; box-shadow: 0 10px 24px rgba(0,0,0,.2); }
-.stat-card-title { color: #9ba8ba; }
-.stat-card-value { color: #f5f7fb; }
-.rms-card { background: #282e37; border-color: #3b4553; box-shadow: none; }
-.filter-bar { background: #282e37; }
-.filter-bar .ant-input, .filter-bar .ant-select-selector { background: #22272f !important; border-color: #46515f !important; color: #eaf0f8 !important; }
-.filter-bar .ant-input::placeholder, .filter-bar .ant-select-selection-placeholder { color: #8492a5 !important; }
-.filter-bar .ant-input:focus, .filter-bar .ant-input-focused, .filter-bar .ant-select-focused .ant-select-selector { border-color: #6d9ff5 !important; box-shadow: 0 0 0 3px rgba(77,141,255,.16) !important; }
-.rms-table .ant-table, .rms-table .ant-table-container { background: #282e37 !important; }
-.rms-table .ant-table { border-top-color: #3b4553; }
-.rms-table .ant-table-thead > tr > th { background: #303741 !important; border-bottom-color: #46515f !important; color: #aab6c7 !important; }
-.rms-table .ant-table-tbody > tr > td { background: #282e37 !important; border-bottom-color: #3b4553 !important; color: #d8e0eb; }
-.rms-table .ant-table-tbody > tr:hover > td { background: #303946 !important; }
-.rms-table .ant-pagination .ant-pagination-item, .rms-table .ant-pagination .ant-pagination-prev, .rms-table .ant-pagination .ant-pagination-next { background: #282e37; border-color: #46515f; }
-.rms-table .ant-pagination a, .rms-table .ant-pagination button { color: #c1ccda; }
-.rms-table .ant-btn-link { color: #8db7ff !important; }
-.rms-content .ant-btn-default { background: #303741; border-color: #4a5666; color: #d7e0ec; }
-.rms-content .ant-btn-default:hover { background: #394352; border-color: #739ce3; color: #fff; }
-.rms-content .ant-btn-primary, .rms-content .ant-btn-primary[style] { background: #4d8dff !important; border-color: #4d8dff !important; color: #fff; }
-.rms-content .ant-btn-primary:hover, .rms-content .ant-btn-primary[style]:hover { background: #6aa1ff !important; border-color: #6aa1ff !important; }
-.rms-content .ant-tag { background: #303b4b !important; border-color: #4b5e78 !important; color: #b9d1f8 !important; }
-.rms-content .ant-alert { background: #292f38; border-color: #46515f; color: #dbe4f0; }
-.rms-content .ant-empty-description, .rms-content .ant-table-placeholder { color: #9ba8ba; }
-.rms-content .ant-statistic-title, .rms-content .ant-typography { color: #dce4ef; }
+/* Light-only console mode. The blue accent remains part of XNET branding,
+   while surfaces and navigation stay bright and easy to scan. */
+body, #root { background: #f6f8fc; color: #172238; }
+.rms-sider { background: #fff !important; border-right: 1px solid #e4e9f1; box-shadow: 4px 0 18px rgba(25,42,70,.04); }
+.rms-brand { background: #fff; border-bottom-color: #e4e9f1; }
+.rms-brand h2 { color: #172238; }
+.rms-brand span { color: #718096; }
+.rms-sider .ant-menu { background: #fff !important; }
+.rms-sider .ant-menu-item, .rms-sider .ant-menu-submenu-title { color: #60708a !important; }
+.rms-sider .ant-menu-item .ant-menu-item-icon, .rms-sider .ant-menu-submenu-title .ant-menu-item-icon { color: #8091a9; }
+.rms-sider .ant-menu-item:hover, .rms-sider .ant-menu-submenu-title:hover { background: #f4f7fc !important; color: #1d355b !important; }
+.rms-sider .ant-menu-item-selected { background: #edf4ff !important; box-shadow: none !important; color: #225ebc !important; font-weight: 600; }
+.rms-sider .ant-menu-item-selected .ant-menu-item-icon { color: #3978e8; }
+.rms-sider .ant-menu-submenu-selected > .ant-menu-submenu-title { color: #334b70 !important; }
+.rms-sider .ant-menu-submenu-arrow { color: #8a99ad; }
+.rms-navbar { background: rgba(255,255,255,.96); border-bottom-color: #e4e9f1; }
+.global-search { width: 280px; }
+.global-search.ant-input-search .ant-input-group .ant-input-affix-wrapper { border-color: #d9e0ea; border-radius: 8px 0 0 8px; }
+.global-search .ant-input, .global-search .ant-input-affix-wrapper { background: #fff; color: #172238; }
+.rms-content { background: #f6f8fc; }
+.stat-card, .rms-card, .filter-bar, .rms-table .ant-table, .rms-table .ant-table-container { background: #fff !important; }
+.stat-card { border-color: #e4e9f1; }
+.stat-card:hover { background: #fff; border-color: #cbdcf9; }
+.stat-card-title { color: #78869a; }
+.stat-card-value { color: #172238; }
+.rms-card { border-color: #e4e9f1; }
+.filter-bar .ant-input, .filter-bar .ant-select-selector { background: #fff !important; border-color: #d9e0ea !important; color: #172238 !important; }
+.rms-table .ant-table { border-top-color: #e4e9f1; }
+.rms-table .ant-table-thead > tr > th { background: #f8fafc !important; border-bottom-color: #e4e9f1 !important; color: #738198 !important; }
+.rms-table .ant-table-tbody > tr > td { background: #fff !important; border-bottom-color: #edf0f5 !important; color: #344258; }
+.rms-table .ant-table-tbody > tr:hover > td { background: #f7faff !important; }
+.rms-content .ant-btn-default { background: #fff; border-color: #d9e0ea; color: #344258; }
+.rms-content .ant-btn-default:hover { background: #f5f8fd; border-color: #8eb3f2; color: #225ebc; }
+.rms-content .ant-alert { background: #fff; border-color: #e4e9f1; color: #344258; }
+.rms-content .ant-empty-description, .rms-content .ant-table-placeholder { color: #718096; }
+.rms-content .ant-statistic-title, .rms-content .ant-typography { color: #344258; }
+.auth-body { background: #f6f8fc; }
+.auth-card { border: 1px solid #e4e9f1; border-radius: 16px; box-shadow: 0 18px 45px rgba(25,42,70,.10); max-width: 26rem; padding: 2.75rem; }
+.auth-logo { height: 2.75rem; margin-bottom: 1.5rem; }
+.auth-kicker { color: #718096; font-size: 10px; font-weight: 700; letter-spacing: 1.2px; margin-bottom: 8px; }
+.auth-title { color: #172238; font-size: 1.55rem; font-weight: 700; margin-bottom: 1.75rem; }
+.auth-input-pill, .auth-input-pill.ant-input, .auth-input-pill.ant-input-affix-wrapper { border-color: #d9e0ea !important; border-radius: 8px !important; color: #172238 !important; padding: 9px 12px !important; }
+.auth-input-pill:hover, .auth-input-pill.ant-input-affix-wrapper:hover, .auth-input-pill:focus, .auth-input-pill-focused, .auth-input-pill.ant-input-affix-wrapper-focused { border-color: #8eb3f2 !important; box-shadow: 0 0 0 3px rgba(57,120,232,.12) !important; }
+.auth-btn-pill { background: #3978e8 !important; border-color: #3978e8 !important; border-radius: 8px !important; box-shadow: 0 5px 12px rgba(57,120,232,.22) !important; height: 42px !important; }
+.auth-btn-pill:hover, .auth-btn-pill:focus { background: #2d68d2 !important; border-color: #2d68d2 !important; }

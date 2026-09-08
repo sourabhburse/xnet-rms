@@ -114,7 +114,9 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) sessions(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	s.rows(w, `SELECT row_to_json(t) FROM (SELECT s.id,s.device_id,s.user_id,s.protocol,s.expires_at,s.closed_at FROM sessions s JOIN devices d ON d.id=s.device_id WHERE ($1='SUPER_ADMIN' OR d.organization_id=$2) AND s.closed_at IS NULL ORDER BY s.created_at DESC) t`, a.Role, a.Org)
+	org, ok := scopedOrganization(r, a)
+	if !ok { fail(w, 400, "invalid organization"); return }
+	s.rows(w, `SELECT row_to_json(t) FROM (SELECT s.id,s.device_id,s.user_id,s.protocol,s.expires_at,s.closed_at FROM sessions s JOIN devices d ON d.id=s.device_id WHERE ($1='' OR d.organization_id=$1) AND s.closed_at IS NULL ORDER BY s.created_at DESC) t`, org)
 }
 func (s *Core) closeSession(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Layout, Menu } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -40,18 +40,10 @@ export default function Sidebar({
   type MenuItem = Required<MenuProps>['items'][number];
   const items: MenuItem[] = [];
 
-  // Group 1: Overview
   items.push({
-    key: 'grp-fleet',
-    label: 'Overview',
-    type: 'group',
-    children: [
-      {
-        key: 'dashboard',
-        icon: <DashboardOutlined />,
-        label: 'Fleet Overview',
-      },
-    ],
+    key: 'dashboard',
+    icon: <DashboardOutlined />,
+    label: 'Fleet Overview',
   });
 
   // Group 2: Devices
@@ -103,8 +95,8 @@ export default function Sidebar({
 
   items.push({
     key: 'grp-devices',
+    icon: <HddOutlined />,
     label: 'Device Management',
-    type: 'group',
     children: deviceChildren,
   });
 
@@ -112,8 +104,8 @@ export default function Sidebar({
   if (isOperator) {
     items.push({
       key: 'grp-remote',
+      icon: <LinkOutlined />,
       label: 'Remote Access',
-      type: 'group',
       children: [
         {
           key: 'sessions',
@@ -141,8 +133,8 @@ export default function Sidebar({
 
   items.push({
     key: 'grp-config',
+    icon: <LineChartOutlined />,
     label: 'Configuration',
-    type: 'group',
     children: configChildren,
   });
 
@@ -183,11 +175,13 @@ export default function Sidebar({
 
     items.push({
       key: 'grp-admin',
+      icon: <ApartmentOutlined />,
       label: 'Administration',
-      type: 'group',
       children: adminChildren,
     });
   }
+
+  const [openKeys, setOpenKeys] = useState<string[]>(['grp-devices', 'grp-remote']);
 
   return (
     <Layout.Sider
@@ -205,7 +199,9 @@ export default function Sidebar({
       <Menu
         mode="inline"
         selectedKeys={[currentView]}
+        openKeys={openKeys}
         items={items}
+        onOpenChange={setOpenKeys}
         onClick={e => onSelectView(e.key)}
       />
     </Layout.Sider>

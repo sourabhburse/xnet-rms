@@ -230,10 +230,25 @@ func (s *Core) rows(w http.ResponseWriter, q string, args ...any) {
 	}
 	output(w, 200, v)
 }
+func scopedOrganization(r *http.Request, a Actor) (string, bool) {
+	if a.Role != "SUPER_ADMIN" {
+		return a.Org, true
+	}
+	org := r.URL.Query().Get("organization_id")
+	if org != "" && !validID(org) {
+		return "", false
+	}
+	return org, true
+}
 func (s *Core) dashboard(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
+	org, ok := scopedOrganization(r, a)
+	if !ok {
+		fail(w, 400, "invalid organization")
+		return
+	}
 	var total, online, revoked int
-	err := s.DB.QueryRow("SELECT count(*),count(*) FILTER(WHERE last_seen>now()-interval '180 seconds' AND NOT revoked),count(*) FILTER(WHERE revoked) FROM devices WHERE $1='SUPER_ADMIN' OR organization_id=$2", a.Role, a.Org).Scan(&total, &online, &revoked)
+	err := s.DB.QueryRow("SELECT count(*),count(*) FILTER(WHERE last_seen>now()-interval '180 seconds' AND NOT revoked),count(*) FILTER(WHERE revoked) FROM devices WHERE $1='' OR organization_id=$1", org).Scan(&total, &online, &revoked)
 	if err != nil {
 		fail(w, 503, "dashboard unavailable")
 		return
@@ -242,6 +257,11 @@ func (s *Core) dashboard(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) listDevices(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
+	org, ok := scopedOrganization(r, a)
+	if !ok {
+		fail(w, 400, "invalid organization")
+		return
+	}
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
@@ -254,14 +274,14 @@ func (s *Core) listDevices(w http.ResponseWriter, r *http.Request) {
 	source := r.URL.Query().Get("source")
 	field := r.URL.Query().Get("field")
 	value := r.URL.Query().Get("value")
-	filter := ` ($1='SUPER_ADMIN' OR d.organization_id=$2) AND ($3='' OR d.serial_number ILIKE '%'||$3||'%') AND ($7='' OR EXISTS(SELECT 1 FROM device_tags dt JOIN tags tg ON tg.id=dt.tag_id WHERE dt.device_id=d.id AND tg.name=$7)) AND ($4='' OR EXISTS(SELECT 1 FROM current_snapshots f WHERE f.device_id=d.id AND f.source_id=$4 AND f.fields->$5->>'value'=$6)) `
-	args := []any{a.Role, a.Org, q, source, field, value, r.URL.Query().Get("tag")}
+	filter := ` ($1='' OR d.organization_id=$1) AND ($2='' OR d.serial_number ILIKE '%'||$2||'%') AND ($6='' OR EXISTS(SELECT 1 FROM device_tags dt JOIN tags tg ON tg.id=dt.tag_id WHERE dt.device_id=d.id AND tg.name=$6)) AND ($3='' OR EXISTS(SELECT 1 FROM current_snapshots f WHERE f.device_id=d.id AND f.source_id=$3 AND f.fields->$4->>'value'=$5)) `
+	args := []any{org, q, source, field, value, r.URL.Query().Get("tag")}
 	var total int
 	if s.DB.QueryRow("SELECT count(*) FROM devices d WHERE "+filter, args...).Scan(&total) != nil {
 		fail(w, 503, "query unavailable")
 		return
 	}
-	rows, e := jsonRows(s.DB, `SELECT row_to_json(t) FROM (SELECT d.id,d.organization_id,d.name,d.lan_mac,coalesce((SELECT jsonb_agg(t.name ORDER BY t.name) FROM device_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.device_id=d.id),'[]') AS tags,d.serial_number,d.model,d.firmware_version,d.revoked,d.last_seen,CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END AS status,coalesce((SELECT jsonb_agg(jsonb_build_object('source_id',c.source_id,'fields',c.fields,'status',c.status,'received_at',c.received_at,'observed_at',c.observed_at,'stale',c.observed_at<now()-((p.definition->>'interval_seconds')::integer*2)*interval '1 second')) FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE c.device_id=d.id),'[]') AS sources FROM devices d WHERE `+filter+` ORDER BY serial_number LIMIT 100 OFFSET $8) t`, append(args, (page-1)*100)...)
+	rows, e := jsonRows(s.DB, `SELECT row_to_json(t) FROM (SELECT d.id,d.organization_id,d.name,d.lan_mac,coalesce((SELECT jsonb_agg(t.name ORDER BY t.name) FROM device_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.device_id=d.id),'[]') AS tags,d.serial_number,d.model,d.firmware_version,d.revoked,d.last_seen,CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END AS status,coalesce((SELECT jsonb_agg(jsonb_build_object('source_id',c.source_id,'fields',c.fields,'status',c.status,'received_at',c.received_at,'observed_at',c.observed_at,'stale',c.observed_at<now()-((p.definition->>'interval_seconds')::integer*2)*interval '1 second')) FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE c.device_id=d.id),'[]') AS sources FROM devices d WHERE `+filter+` ORDER BY serial_number LIMIT 100 OFFSET $7) t`, append(args, (page-1)*100)...)
 	if e != nil {
 		fail(w, 503, "query unavailable")
 		return
@@ -320,7 +340,9 @@ func (s *Core) createOrganization(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) users(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	s.rows(w, "SELECT row_to_json(t) FROM (SELECT id,organization_id,email,role,disabled FROM users WHERE $1='SUPER_ADMIN' OR organization_id=$2) t", a.Role, a.Org)
+	org, ok := scopedOrganization(r, a)
+	if !ok { fail(w, 400, "invalid organization"); return }
+	s.rows(w, "SELECT row_to_json(t) FROM (SELECT id,organization_id,email,role,disabled FROM users WHERE $1='' OR organization_id=$1) t", org)
 }
 func (s *Core) createUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -384,7 +406,9 @@ func (s *Core) disableUser(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) tokens(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	s.rows(w, "SELECT row_to_json(t) FROM (SELECT id,organization_id,name,expires_at,max_uses,used_count,revoked FROM enrollment_tokens WHERE $1='SUPER_ADMIN' OR organization_id=$2) t", a.Role, a.Org)
+	org, ok := scopedOrganization(r, a)
+	if !ok { fail(w, 400, "invalid organization"); return }
+	s.rows(w, "SELECT row_to_json(t) FROM (SELECT id,organization_id,name,expires_at,max_uses,used_count,revoked FROM enrollment_tokens WHERE $1='' OR organization_id=$1) t", org)
 }
 func (s *Core) createToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -450,7 +474,9 @@ func (s *Core) deleteToken(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) auditLogs(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	s.rows(w, "SELECT row_to_json(t) FROM (SELECT * FROM audit_logs WHERE $1='SUPER_ADMIN' OR organization_id=$2 ORDER BY id DESC LIMIT 500) t", a.Role, a.Org)
+	org, ok := scopedOrganization(r, a)
+	if !ok { fail(w, 400, "invalid organization"); return }
+	s.rows(w, "SELECT row_to_json(t) FROM (SELECT * FROM audit_logs WHERE $1='' OR organization_id=$1 ORDER BY id DESC LIMIT 500) t", org)
 }
 func (s *Core) revoke(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

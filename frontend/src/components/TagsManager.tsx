@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Button,
   Card,
@@ -38,6 +38,10 @@ export default function TagsManager({
   const [tagName, setTagName] = useState('');
   const [targetOrg, setTargetOrg] = useState(selectedOrg || user.organization_id || '');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (selectedOrg) setTargetOrg(selectedOrg);
+  }, [selectedOrg]);
 
   const filteredTags = (tags || []).filter(
     t => !selectedOrg || t.organization_id === selectedOrg

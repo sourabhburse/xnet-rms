@@ -1,10 +1,11 @@
 import React from 'react';
-import { Button, Select, Space, Tag, Tooltip } from 'antd';
+import { Button, Input, Select, Space, Tag, Tooltip } from 'antd';
 import {
   ReloadOutlined,
   LogoutOutlined,
   UserOutlined,
   BankOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { User, Organization } from '../types';
 
@@ -16,6 +17,9 @@ interface NavbarProps {
   onRefresh: () => void;
   refreshing: boolean;
   onSignOut: () => void;
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
+  onSearchSubmit: (value: string) => void;
 }
 
 export default function Navbar({
@@ -26,12 +30,25 @@ export default function Navbar({
   onRefresh,
   refreshing,
   onSignOut,
+  searchQuery,
+  onSearchChange,
+  onSearchSubmit,
 }: NavbarProps) {
   const isSuperAdmin = user.role === 'SUPER_ADMIN';
 
   return (
     <header className="rms-navbar">
       <div className="rms-nav-left">
+        <Input.Search
+          aria-label="Search devices"
+          className="global-search"
+          placeholder="Search devices..."
+          prefix={<SearchOutlined />}
+          value={searchQuery}
+          allowClear
+          onChange={e => onSearchChange(e.target.value)}
+          onSearch={onSearchSubmit}
+        />
         {isSuperAdmin && (
           <Space>
             <BankOutlined />

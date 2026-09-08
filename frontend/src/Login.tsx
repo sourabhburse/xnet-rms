@@ -36,8 +36,9 @@ export default function Login({ onLoginSuccess, api }: LoginProps) {
     <div className="auth-body">
       <div className="auth-shell">
         <div className="auth-card">
-          <img src="/logo.png" alt="NCMS" className="auth-logo" />
-          <h2 className="auth-title">Welcome, Login</h2>
+          <img src="/logo.png" alt="XNET RMS" className="auth-logo" />
+          <div className="auth-kicker">REMOTE MANAGEMENT SYSTEM</div>
+          <h2 className="auth-title">Sign in to XNET RMS</h2>
 
           {error && (
             <Alert

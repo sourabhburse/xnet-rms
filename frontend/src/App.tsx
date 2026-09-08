@@ -102,7 +102,7 @@ export default function App() {
 
       // Always fetch dashboard stats and tags
       const [dashStats, tagList] = await Promise.all([
-        api<DashboardStats>('dashboard').catch(() => ({ total: 0, online: 0, offline: 0, revoked: 0 })),
+        api<DashboardStats>(`dashboard${selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : ''}`).catch(() => ({ total: 0, online: 0, offline: 0, revoked: 0 })),
         api<TagItem[]>('tags').catch(() => []),
       ]);
       setStats(dashStats && typeof dashStats === 'object' ? dashStats : { total: 0, online: 0, offline: 0, revoked: 0 });
@@ -110,9 +110,10 @@ export default function App() {
 
       // Fetch pending devices and registrations if admin
       if (isOrgAdmin) {
+        const onboardingSuffix = selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : '';
         const [pending, regList] = await Promise.all([
-          api<PendingDevice[]>('pending-devices').catch(() => []),
-          api<Registration[]>('registrations').catch(() => []),
+          api<PendingDevice[]>(`pending-devices${onboardingSuffix}`).catch(() => []),
+          api<Registration[]>(`registrations${onboardingSuffix}`).catch(() => []),
         ]);
         setPendingDevices(Array.isArray(pending) ? pending : []);
         setRegistrations(Array.isArray(regList) ? regList : []);
@@ -120,7 +121,8 @@ export default function App() {
 
       // Fetch active sessions if operator
       if (isOperator) {
-        const sessList = await api<SessionItem[]>('sessions').catch(() => []);
+        const sessionSuffix = selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : '';
+        const sessList = await api<SessionItem[]>(`sessions${sessionSuffix}`).catch(() => []);
         setSessions(Array.isArray(sessList) ? sessList : []);
       }
 
@@ -131,6 +133,7 @@ export default function App() {
           q: searchQuery,
           tag: selectedTag,
         });
+        if (selectedOrg) params.set('organization_id', selectedOrg);
         const res = await api<{ items: Device[]; total: number }>(`devices?${params}`);
         let items = Array.isArray(res?.items) ? res.items : [];
         if (statusFilter) {
@@ -139,7 +142,10 @@ export default function App() {
         setDevices(items);
         setTotalDevices(statusFilter ? items.length : (res?.total || 0));
       } else if (['users', 'enrollment-tokens', 'audit-logs', 'organizations', 'profiles', 'bundles'].includes(view)) {
-        const res = await api<any[]>(view);
+        const suffix = selectedOrg && ['users', 'enrollment-tokens', 'audit-logs'].includes(view)
+          ? `?organization_id=${encodeURIComponent(selectedOrg)}`
+          : '';
+        const res = await api<any[]>(`${view}${suffix}`);
         setAdminData(Array.isArray(res) ? res : []);
       }
     } catch (err) {
@@ -264,6 +270,14 @@ export default function App() {
           onRefresh={refreshData}
           refreshing={refreshing}
           onSignOut={handleSignOut}
+          searchQuery={searchQuery}
+          onSearchChange={value => setSearchQuery(value)}
+          onSearchSubmit={value => {
+            setSearchQuery(value);
+            setView('devices');
+            setSelectedDevice(null);
+            setPage(1);
+          }}
         />
 
         <Layout.Content className="rms-content">
