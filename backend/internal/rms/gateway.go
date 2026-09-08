@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"io"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -78,6 +79,7 @@ func (g *Gateway) call(method, path string, payload any, out any) error {
 }
 func (g *Gateway) close(id string, p *Pair) {
 	p.once.Do(func() {
+		log.Printf("rms tunnel session %s closing", id)
 		close(p.done)
 		p.mu.Lock()
 		if p.routerOut != nil {
@@ -137,10 +139,12 @@ func (g *Gateway) Handler() http.Handler {
 			return
 		}
 		var session Session
-		if g.call("GET", "/internal/sessions/"+id, nil, &session) != nil {
+		if err := g.call("GET", "/internal/sessions/"+id, nil, &session); err != nil {
+			log.Printf("rms tunnel session %s inactive: %v path=%s", id, err, r.URL.Path)
 			fail(w, 403, "session inactive")
 			return
 		}
+		log.Printf("rms tunnel session %s request path=%s protocol=%s", id, r.URL.Path, session.Protocol)
 		if r.URL.Path == "/launch" {
 			cookie := secret()
 			if g.call("POST", "/internal/sessions/"+id+"/claim", map[string]string{"ticket": r.URL.Query().Get("ticket"), "cookie": cookie}, nil) != nil {
@@ -229,6 +233,7 @@ func (g *Gateway) Handler() http.Handler {
 			}
 		}
 		if p == nil {
+			log.Printf("rms tunnel session %s has no router pair path=%s", id, r.URL.Path)
 			w.Header().Set("Retry-After", "2")
 			fail(w, 503, "router connecting; retry shortly")
 			return
@@ -628,6 +633,7 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 	e = p.router.WriteJSON(frame)
 	p.write.Unlock()
 	if e != nil {
+		log.Printf("rms tunnel session %s router write failed: %v", id, e)
 		g.close(id, p)
 		fail(w, 502, "router unavailable")
 		return
@@ -636,6 +642,7 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 	defer cancel()
 	select {
 	case <-ctx.Done():
+		log.Printf("rms tunnel session %s request timeout/cancel path=%s: %v", id, r.URL.Path, ctx.Err())
 		g.close(id, p)
 		fail(w, 504, "router timeout")
 	case <-p.done:
@@ -643,6 +650,7 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 	case data := <-p.responses:
 		var res HTTPFrame
 		if json.Unmarshal(data, &res) != nil || res.Status < 200 || res.Status > 599 {
+			log.Printf("rms tunnel session %s invalid router response path=%s", id, r.URL.Path)
 			g.close(id, p)
 			fail(w, 502, "invalid router response")
 			return
