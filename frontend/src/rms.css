@@ -119,14 +119,14 @@ body {
 /* Modern RMS workspace skin. Keep the operational layout, but give it the
    density, hierarchy and colour contrast expected from a current fleet tool. */
 :root {
-  --rms-navy: #101a2d;
-  --rms-navy-soft: #18253d;
-  --rms-blue: #3978e8;
-  --rms-blue-soft: #edf4ff;
-  --rms-page: #f5f7fb;
-  --rms-border: #e4e9f1;
-  --rms-muted: #718096;
-  --rms-shadow: 0 8px 24px rgba(25, 42, 70, .07);
+  --rms-navy: #1d222b;
+  --rms-navy-soft: #252c38;
+  --rms-blue: #4d8dff;
+  --rms-blue-soft: rgba(77,141,255,.16);
+  --rms-page: #20242b;
+  --rms-border: #39414e;
+  --rms-muted: #a5b0c0;
+  --rms-shadow: 0 10px 28px rgba(0, 0, 0, .18);
 }
 
 body, #root { background: var(--rms-page); }
@@ -195,3 +195,46 @@ body, #root { background: var(--rms-page); }
   .user-badge span { display: none; }
   .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Dark operations layout inspired by modern network-management consoles. */
+body, #root { color: #edf2f8; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.rms-sider { background: #1b1f26 !important; }
+.rms-brand { background: #1b1f26; }
+.rms-navbar { background: #242931; border-bottom-color: #3a424f; box-shadow: none; }
+.rms-nav-left .anticon { color: #9aa7b9; }
+.rms-navbar .ant-select-selector, .rms-navbar .ant-select-selection-item, .rms-navbar .ant-select-arrow { background: #2a3039 !important; border-color: #46505f !important; color: #edf2f8 !important; }
+.rms-navbar .ant-select-selection-placeholder { color: #a5b0c0 !important; }
+.user-badge { color: #d9e1ec; }
+.user-badge .ant-tag { background: rgba(77,141,255,.18) !important; border-color: rgba(112,162,255,.35) !important; color: #9fc2ff !important; }
+.rms-navbar .ant-btn { background: transparent; border-color: #46505f; color: #d6deea; }
+.rms-navbar .ant-btn:hover { background: #303743; border-color: #617087; color: #fff; }
+.rms-navbar .ant-btn-dangerous { border-color: transparent; color: #b7c1d0 !important; }
+.rms-navbar .ant-btn-dangerous:hover { background: #303743; color: #fff !important; }
+.rms-content { background: #20242b; }
+.page-title { color: #f5f7fb !important; }
+.page-subtitle { color: #98a6b8; }
+.stat-card { background: #282e37; border-color: #3b4553; box-shadow: none; }
+.stat-card:hover { background: #2c333e; border-color: #5b78aa; box-shadow: 0 10px 24px rgba(0,0,0,.2); }
+.stat-card-title { color: #9ba8ba; }
+.stat-card-value { color: #f5f7fb; }
+.rms-card { background: #282e37; border-color: #3b4553; box-shadow: none; }
+.filter-bar { background: #282e37; }
+.filter-bar .ant-input, .filter-bar .ant-select-selector { background: #22272f !important; border-color: #46515f !important; color: #eaf0f8 !important; }
+.filter-bar .ant-input::placeholder, .filter-bar .ant-select-selection-placeholder { color: #8492a5 !important; }
+.filter-bar .ant-input:focus, .filter-bar .ant-input-focused, .filter-bar .ant-select-focused .ant-select-selector { border-color: #6d9ff5 !important; box-shadow: 0 0 0 3px rgba(77,141,255,.16) !important; }
+.rms-table .ant-table, .rms-table .ant-table-container { background: #282e37 !important; }
+.rms-table .ant-table { border-top-color: #3b4553; }
+.rms-table .ant-table-thead > tr > th { background: #303741 !important; border-bottom-color: #46515f !important; color: #aab6c7 !important; }
+.rms-table .ant-table-tbody > tr > td { background: #282e37 !important; border-bottom-color: #3b4553 !important; color: #d8e0eb; }
+.rms-table .ant-table-tbody > tr:hover > td { background: #303946 !important; }
+.rms-table .ant-pagination .ant-pagination-item, .rms-table .ant-pagination .ant-pagination-prev, .rms-table .ant-pagination .ant-pagination-next { background: #282e37; border-color: #46515f; }
+.rms-table .ant-pagination a, .rms-table .ant-pagination button { color: #c1ccda; }
+.rms-table .ant-btn-link { color: #8db7ff !important; }
+.rms-content .ant-btn-default { background: #303741; border-color: #4a5666; color: #d7e0ec; }
+.rms-content .ant-btn-default:hover { background: #394352; border-color: #739ce3; color: #fff; }
+.rms-content .ant-btn-primary, .rms-content .ant-btn-primary[style] { background: #4d8dff !important; border-color: #4d8dff !important; color: #fff; }
+.rms-content .ant-btn-primary:hover, .rms-content .ant-btn-primary[style]:hover { background: #6aa1ff !important; border-color: #6aa1ff !important; }
+.rms-content .ant-tag { background: #303b4b !important; border-color: #4b5e78 !important; color: #b9d1f8 !important; }
+.rms-content .ant-alert { background: #292f38; border-color: #46515f; color: #dbe4f0; }
+.rms-content .ant-empty-description, .rms-content .ant-table-placeholder { color: #9ba8ba; }
+.rms-content .ant-statistic-title, .rms-content .ant-typography { color: #dce4ef; }
