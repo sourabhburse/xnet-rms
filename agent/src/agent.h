@@ -10,7 +10,7 @@
 #include <time.h>
 #include "parson.h"
 
-#define AGENT_VERSION "2.1.1"
+#define AGENT_VERSION "2.1.2"
 #define DEFAULT_SERVER ""
 #define DEFAULT_MQTT_HOST ""
 #define DEFAULT_MQTT_PORT 8883
