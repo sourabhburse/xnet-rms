@@ -139,6 +139,7 @@ export interface EnrollmentToken {
   max_uses: number | null;
   used_count: number;
   revoked: boolean;
+  group_ids?: string[];
 }
 
 export interface AuditRecord {

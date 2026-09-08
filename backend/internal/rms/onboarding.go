@@ -257,6 +257,9 @@ func activatePending(tx *sql.Tx, pending, org, name string, tags []byte, user st
 		e = assignTags(tx, id, org, tags)
 	}
 	if e == nil {
+		_, e = tx.Exec("INSERT INTO device_group_members(group_id,device_id) SELECT tg.group_id,$2 FROM enrollment_token_groups tg JOIN pending_devices p ON p.token_id=tg.token_id WHERE p.id=$1 ON CONFLICT DO NOTHING", pending, id)
+	}
+	if e == nil {
 		e = audit(tx, org, user, "device.claim", id)
 	}
 	return id, e

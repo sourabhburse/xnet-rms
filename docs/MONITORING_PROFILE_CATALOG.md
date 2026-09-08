@@ -78,6 +78,6 @@ Organizations own users, enrollment tokens, tags, groups, and devices. A user
 query is always scoped to their organization; platform administrators may select
 one organization or all organizations. Device groups are organization-owned,
 and a device may belong to multiple groups. Adding or removing membership never
-changes device ownership. Enrollment-token group defaults can be added after the
-base group workflow is qualified; they should apply only at first claim and
-never move an already-owned device between organizations.
+changes device ownership. An enrollment token may carry default group IDs; those
+memberships are applied once when the router is first claimed. Repeated check-ins
+do not reassign groups, and group IDs must belong to the token's organization.

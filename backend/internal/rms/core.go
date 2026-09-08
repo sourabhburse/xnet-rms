@@ -415,7 +415,7 @@ func (s *Core) tokens(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
 	org, ok := scopedOrganization(r, a)
 	if !ok { fail(w, 400, "invalid organization"); return }
-	s.rows(w, "SELECT row_to_json(t) FROM (SELECT id,organization_id,name,expires_at,max_uses,used_count,revoked FROM enrollment_tokens WHERE $1='' OR organization_id=$1) t", org)
+	s.rows(w, "SELECT row_to_json(t) FROM (SELECT e.id,e.organization_id,e.name,e.expires_at,e.max_uses,e.used_count,e.revoked,coalesce((SELECT jsonb_agg(g.id ORDER BY g.name) FROM enrollment_token_groups tg JOIN device_groups g ON g.id=tg.group_id WHERE tg.token_id=e.id),'[]') AS group_ids FROM enrollment_tokens e WHERE $1='' OR e.organization_id=$1) t", org)
 }
 func (s *Core) createToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -424,6 +424,7 @@ func (s *Core) createToken(w http.ResponseWriter, r *http.Request) {
 		Org       string     `json:"organization_id"`
 		MaxUses   *int       `json:"max_uses"`
 		ExpiresAt *time.Time `json:"expires_at"`
+		GroupIDs  []string   `json:"group_ids"`
 	}
 	if !body(w, r, &req) {
 		return
@@ -444,8 +445,19 @@ func (s *Core) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := randomID()
-	e := s.mutateAudit(req.Org, a.ID, "token.create", id, "INSERT INTO enrollment_tokens(id,organization_id,name,token_hash,max_uses,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, req.Org, req.Name, digest(req.Token), req.MaxUses, req.ExpiresAt)
-	if e != nil {
+	tx, e := s.DB.Begin()
+	if e != nil { fail(w, 503, "database unavailable"); return }
+	defer tx.Rollback()
+	_, e = tx.Exec("INSERT INTO enrollment_tokens(id,organization_id,name,token_hash,max_uses,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, req.Org, req.Name, digest(req.Token), req.MaxUses, req.ExpiresAt)
+	for _, groupID := range req.GroupIDs {
+		if e != nil { break }
+		var groupOrg string
+		e = tx.QueryRow("SELECT organization_id FROM device_groups WHERE id=$1", groupID).Scan(&groupOrg)
+		if e == nil && groupOrg != req.Org { e = errors.New("group organization mismatch") }
+		if e == nil { _, e = tx.Exec("INSERT INTO enrollment_token_groups(token_id,group_id) VALUES($1,$2)", id, groupID) }
+	}
+	if e == nil { e = audit(tx, req.Org, a.ID, "token.create", id) }
+	if e != nil || tx.Commit() != nil {
 		fail(w, 409, "token creation failed")
 		return
 	}

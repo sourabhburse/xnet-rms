@@ -403,8 +403,8 @@ export default function App() {
                 <GroupsManager
                   user={user}
                   organizations={organizations}
-                  selectedOrg={selectedOrg}
                   groups={groups}
+                  selectedOrg={selectedOrg}
                   devices={devices}
                   onRefresh={refreshData}
                 />
@@ -479,6 +479,7 @@ export default function App() {
                   currentUser={user}
                   data={adminData}
                   organizations={organizations}
+                  groups={groups}
                   selectedOrg={selectedOrg}
                   loading={loading || refreshing}
                   onRefresh={refreshData}

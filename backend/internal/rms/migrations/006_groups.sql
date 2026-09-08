@@ -22,3 +22,16 @@ BEGIN
  RETURN NEW;
 END $$;
 CREATE TRIGGER device_group_owner BEFORE INSERT OR UPDATE ON device_group_members FOR EACH ROW EXECUTE FUNCTION validate_device_group_owner();
+CREATE TABLE enrollment_token_groups (
+ token_id text NOT NULL REFERENCES enrollment_tokens ON DELETE CASCADE,
+ group_id text NOT NULL REFERENCES device_groups ON DELETE CASCADE,
+ PRIMARY KEY(token_id,group_id)
+);
+CREATE FUNCTION validate_enrollment_token_group_owner() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM enrollment_tokens t JOIN device_groups g ON g.organization_id=t.organization_id WHERE t.id=NEW.token_id AND g.id=NEW.group_id) THEN
+  RAISE EXCEPTION 'enrollment token group ownership mismatch';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER enrollment_token_group_owner BEFORE INSERT OR UPDATE ON enrollment_token_groups FOR EACH ROW EXECUTE FUNCTION validate_enrollment_token_group_owner();

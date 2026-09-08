@@ -24,6 +24,7 @@ import {
 import {
   AuditRecord,
   CollectorBundle,
+  DeviceGroup,
   EnrollmentToken,
   Organization,
   Profile,
@@ -36,6 +37,7 @@ interface AdminViewsProps {
   currentUser: User;
   data: any[];
   organizations: Organization[];
+  groups: DeviceGroup[];
   selectedOrg: string;
   loading: boolean;
   onRefresh: () => void;
@@ -46,6 +48,7 @@ export default function AdminViews({
   currentUser,
   data,
   organizations,
+  groups,
   selectedOrg,
   loading,
   onRefresh,
@@ -57,7 +60,7 @@ export default function AdminViews({
   // Form states
   const [targetOrg, setTargetOrg] = useState(selectedOrg || currentUser.organization_id || '');
   const [userForm, setUserForm] = useState({ email: '', password: '', role: 'OPERATOR' });
-  const [tokenForm, setTokenForm] = useState({ name: '', max_uses: 1 });
+  const [tokenForm, setTokenForm] = useState({ name: '', max_uses: 1, group_ids: [] as string[] });
   const [customerForm, setCustomerForm] = useState({ name: '' });
   const [rawJsonForm, setRawJsonForm] = useState('');
   const [createdTokenNotice, setCreatedTokenNotice] = useState<string | null>(null);
@@ -454,6 +457,18 @@ export default function AdminViews({
                   value={tokenForm.max_uses}
                   onChange={v => setTokenForm({ ...tokenForm, max_uses: v || 1 })}
                   style={{ width: '100%' }}
+                />
+              </Form.Item>
+              <Form.Item label="Default device groups">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="Optional groups applied on first claim"
+                  value={tokenForm.group_ids}
+                  onChange={v => setTokenForm({ ...tokenForm, group_ids: v })}
+                  options={groups
+                    .filter(g => !targetOrg || g.organization_id === targetOrg)
+                    .map(g => ({ value: g.id, label: g.name }))}
                 />
               </Form.Item>
             </Form>
