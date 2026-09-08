@@ -115,3 +115,83 @@ body {
 
 @media (max-width: 1024px) { .rms-content { padding: 16px 18px; } }
 @media (max-width: 767.98px) { .rms-navbar { padding: 0 14px; } .auth-shell { padding: 1.5rem; } .auth-card { padding: 2rem 1.5rem; } }
+
+/* Modern RMS workspace skin. Keep the operational layout, but give it the
+   density, hierarchy and colour contrast expected from a current fleet tool. */
+:root {
+  --rms-navy: #101a2d;
+  --rms-navy-soft: #18253d;
+  --rms-blue: #3978e8;
+  --rms-blue-soft: #edf4ff;
+  --rms-page: #f5f7fb;
+  --rms-border: #e4e9f1;
+  --rms-muted: #718096;
+  --rms-shadow: 0 8px 24px rgba(25, 42, 70, .07);
+}
+
+body, #root { background: var(--rms-page); }
+.rms-sider { background: var(--rms-navy) !important; border-right: 0; box-shadow: 8px 0 24px rgba(15, 23, 42, .08); }
+.rms-brand { background: var(--rms-navy); border-bottom: 1px solid rgba(255,255,255,.08); height: 72px; padding: 18px 20px; }
+.rms-brand img { height: 30px; }
+.rms-brand h2 { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+.rms-brand span { color: #8da1bf; font-size: 10px; margin-left: 7px; }
+.rms-sider .ant-menu { padding: 14px 10px; }
+.rms-sider .ant-menu-item { border-radius: 9px !important; color: #aab9d0 !important; font-size: 13px; height: 42px; line-height: 42px; margin: 3px 0 !important; width: 100% !important; }
+.rms-sider .ant-menu-item .ant-menu-item-icon { color: #8295b2; font-size: 16px; }
+.rms-sider .ant-menu-item:hover { background: rgba(255,255,255,.07) !important; color: #fff !important; }
+.rms-sider .ant-menu-item-selected { background: rgba(57,120,232,.22) !important; box-shadow: inset 3px 0 0 #70a2ff; color: #fff !important; font-weight: 600; }
+.rms-sider .ant-menu-item-selected .ant-menu-item-icon { color: #8bb4ff; }
+.rms-sider .ant-menu-item-group-title { color: #7185a4 !important; font-size: 10px; letter-spacing: 1.1px; padding: 17px 12px 7px !important; }
+.menu-count { background: #3978e8; border-radius: 999px; font-size: 10px; margin-left: 7px; padding: 2px 7px; }
+
+.rms-navbar { background: rgba(255,255,255,.94); border-bottom: 1px solid var(--rms-border); box-shadow: 0 1px 5px rgba(25,42,70,.03); height: 72px; padding: 0 32px; }
+.rms-nav-left, .rms-nav-right { gap: 12px; }
+.rms-nav-left .anticon { color: var(--rms-muted); }
+.rms-nav-right > .ant-btn { border-radius: 8px; }
+.user-badge { background: transparent; border: 0; color: #39465a; font-size: 13px; padding: 5px 8px; }
+.user-badge .anticon { color: var(--rms-blue); }
+.user-badge .ant-tag { background: var(--rms-blue-soft) !important; border-color: #d6e5ff !important; border-radius: 999px; color: #2d65c7 !important; font-size: 10px; font-weight: 700; letter-spacing: .2px; }
+.rms-navbar .ant-btn-dangerous { color: #536176 !important; }
+.rms-navbar .ant-btn-dangerous:hover { background: #f0f3f8; color: #24324a !important; }
+
+.rms-content { background: var(--rms-page); min-height: calc(100vh - 72px); padding: 32px 36px; }
+.page-header { margin-bottom: 24px; }
+.page-title { color: #172238 !important; font-size: 26px !important; font-weight: 700 !important; letter-spacing: -.4px; }
+.page-subtitle { color: var(--rms-muted); font-size: 14px; margin-top: 5px; }
+.stats-grid { gap: 16px; margin-bottom: 24px; }
+.stat-card { background: #fff; border: 1px solid var(--rms-border); border-radius: 14px; box-shadow: var(--rms-shadow); padding: 20px 22px; position: relative; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.stat-card:hover { background: #fff; border-color: #cbdcf9; box-shadow: 0 12px 28px rgba(35,79,143,.12); transform: translateY(-2px); }
+.stat-card-title { color: #78869a; font-size: 11px; letter-spacing: .65px; margin-bottom: 9px; }
+.stat-card-value { color: #172238; font-size: 30px; font-weight: 700; }
+.status-pill { border-radius: 999px; font-size: 11px; line-height: 17px; padding: 3px 9px; }
+.status-online { background: #ecf9f1; border-color: #bde8ce; color: #16804a; }
+.status-online .status-dot { background: #22a761; }
+.status-offline { background: #fff7eb; border-color: #f4d6a6; color: #a96812; }
+.status-offline .status-dot { background: #d88b22; }
+.status-awaiting { background: #f3efff; border-color: #d9cdfc; color: #6945bd; }
+.status-awaiting .status-dot { background: #805bd0; }
+.status-pending { background: var(--rms-blue-soft); border-color: #d2e1ff; color: #2c67c8; }
+.status-pending .status-dot { background: var(--rms-blue); }
+.status-revoked { background: #f1f3f6; border-color: #d9dee7; color: #586579; }
+.status-revoked .status-dot { background: #7a879a; }
+
+.rms-card { border: 1px solid var(--rms-border); border-radius: 14px; box-shadow: var(--rms-shadow); margin-bottom: 24px; overflow: hidden; }
+.filter-bar { background: #fff; margin: 0; padding: 20px 20px 16px; }
+.filter-bar .ant-input, .filter-bar .ant-select-selector { border-color: #d9e0ea !important; border-radius: 8px !important; min-height: 38px; }
+.filter-bar .ant-input:focus, .filter-bar .ant-input-focused, .filter-bar .ant-select-focused .ant-select-selector { border-color: #8eb3f2 !important; box-shadow: 0 0 0 3px rgba(57,120,232,.1) !important; }
+.rms-table .ant-table { border-top: 1px solid var(--rms-border); }
+.rms-table .ant-table-thead > tr > th { background: #f8fafc !important; border-bottom: 1px solid var(--rms-border) !important; color: #738198 !important; font-size: 10px !important; letter-spacing: .75px; padding: 13px 16px !important; }
+.rms-table .ant-table-tbody > tr > td { border-bottom: 1px solid #edf0f5 !important; color: #344258; font-size: 13px; padding: 15px 16px !important; }
+.rms-table .ant-table-tbody > tr:hover > td { background: #f7faff !important; }
+.rms-table .ant-btn-link { color: #2868d3 !important; }
+.rms-content .ant-btn { border-radius: 8px; }
+.rms-content .ant-btn-primary, .rms-content .ant-btn-primary[style] { background: var(--rms-blue) !important; border-color: var(--rms-blue) !important; box-shadow: 0 3px 8px rgba(57,120,232,.2) !important; }
+.rms-content .ant-btn-primary:hover, .rms-content .ant-btn-primary[style]:hover { background: #2d68d2 !important; border-color: #2d68d2 !important; }
+.rms-content .ant-tag { background: #f1f5fb !important; border-color: #dbe4f1 !important; border-radius: 999px; color: #4d617b !important; }
+
+@media (max-width: 767.98px) {
+  .rms-content { padding: 22px 16px; }
+  .rms-navbar { padding: 0 16px; }
+  .user-badge span { display: none; }
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
