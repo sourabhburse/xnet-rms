@@ -241,3 +241,32 @@ On a systemd installation, use `journalctl -u xnet-rms-core -u xnet-rms-tunnel`.
 The hosted service files and VPS-only steps are documented in
 [`deployment/v2/README.md`](deployment/v2/README.md); do not run the Contabo
 installer on a development laptop.
+
+## Open LuCI through a local TCP forward
+
+The dashboard’s **LuCI TCP tunnel** action creates a short-lived, authenticated
+SSH session and displays a one-time private key and launch URL. Build the local
+WebSocket stdin/stdout bridge once:
+
+```sh
+cd backend
+go build -o ../rms-proxy ./cmd/proxy
+cd ..
+```
+
+Save the displayed key as `/tmp/xnet-rms-<device-id>.key` with mode `0600`, then
+run the displayed SSH command. It forwards the router’s LuCI HTTP port to the
+local workstation:
+
+```sh
+ssh -o ProxyCommand="./rms-proxy '<launch-url>'" \
+  -o StrictHostKeyChecking=accept-new \
+  -i /tmp/xnet-rms-<device-id>.key \
+  -N -L 18080:127.0.0.1:80 root@xnet-rms-router
+```
+
+Open `http://127.0.0.1:18080`. The SSH tunnel carries LuCI traffic as raw TCP,
+so form submissions, redirects, cookies, JavaScript and Save & Apply use the
+router’s original HTTP behavior. The launch URL is single-use and the session
+expires automatically. For a self-signed RMS installation, pass its CA to the
+bridge with `-ca /path/to/ca.crt`.

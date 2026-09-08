@@ -2,6 +2,9 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
+	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -12,16 +15,32 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatalf("Usage: %s <ws(s)://url>", os.Args[0])
+	caPath := flag.String("ca", "", "PEM CA certificate to trust for the RMS tunnel")
+	flag.Parse()
+	if flag.NArg() != 1 {
+		log.Fatalf("Usage: %s [-ca ca.crt] <launch-url>", os.Args[0])
 	}
-	rawURL := os.Args[1]
-	u, err := url.Parse(rawURL)
+	u, err := proxyURL(flag.Arg(0))
 	if err != nil {
 		log.Fatalf("invalid url: %v", err)
 	}
 
-	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{}}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if *caPath != "" {
+		pem, err := os.ReadFile(*caPath)
+		if err != nil {
+			log.Fatalf("read CA certificate: %v", err)
+		}
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			log.Fatalf("CA file does not contain a PEM certificate")
+		}
+		tlsConfig.RootCAs = pool
+	}
+	dialer := websocket.Dialer{TLSClientConfig: tlsConfig}
 	headers := http.Header{}
 	ws, _, err := dialer.Dial(u.String(), headers)
 	if err != nil {
@@ -56,4 +75,31 @@ func main() {
 			os.Exit(0)
 		}
 	}
+}
+
+// proxyURL accepts the launch URL returned by the RMS API as well as a raw
+// ws:// or wss:// endpoint. The launch endpoint is intentionally converted to
+// /raw so the helper can be used as an OpenSSH ProxyCommand without following
+// an HTTP redirect or exposing the session cookie to a shell.
+func proxyURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return nil, err
+	}
+	switch u.Scheme {
+	case "https":
+		u.Scheme = "wss"
+	case "http":
+		u.Scheme = "ws"
+	case "ws", "wss":
+	default:
+		return nil, fmt.Errorf("URL must use http(s) or ws(s)")
+	}
+	if u.Path == "/launch" {
+		if u.Query().Get("ticket") == "" {
+			return nil, fmt.Errorf("launch URL is missing its ticket")
+		}
+		u.Path = "/raw"
+	}
+	return u, nil
 }
