@@ -54,6 +54,24 @@ func TestForwardLuciRequestHeadersPreservesRouterLoginCookie(t *testing.T) {
 	}
 }
 
+func TestSameOriginNormalizesEquivalentHTTPSOrigins(t *testing.T) {
+	for _, tc := range []struct {
+		expected, actual string
+		want            bool
+	}{
+		{"https://example.test", "https://EXAMPLE.TEST:443", true},
+		{"https://example.test:8445", "https://example.test:8445", true},
+		{"https://example.test:8445/", "https://example.test:8445", true},
+		{"https://example.test:8445", "https://example.test", false},
+		{"https://example.test:8445", "http://example.test:8445", false},
+		{"https://example.test:8445", "https://example.test:8445/path", false},
+	} {
+		if got := sameOrigin(tc.expected, tc.actual); got != tc.want {
+			t.Errorf("sameOrigin(%q, %q) = %v, want %v", tc.expected, tc.actual, got, tc.want)
+		}
+	}
+}
+
 func TestWsNetConnAdapter(t *testing.T) {
 	pr, pw := io.Pipe()
 	defer pr.Close()

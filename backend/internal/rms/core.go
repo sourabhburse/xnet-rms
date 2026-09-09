@@ -9,6 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -129,9 +130,13 @@ func (s *Core) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		if r.Method != "GET" && r.Header.Get("Origin") != "" && r.Header.Get("Origin") != s.Config.PublicURL {
-			fail(w, 403, "origin rejected")
-			return
+		if r.Method != "GET" {
+			origin := r.Header.Get("Origin")
+			if origin != "" && !sameOrigin(s.Config.PublicURL, origin) {
+				log.Printf("rms core origin rejected host=%q origin=%q expected=%q", r.Host, origin, s.Config.PublicURL)
+				fail(w, 403, "origin rejected")
+				return
+			}
 		}
 		if (r.URL.Path == "/api/v1/auth/login" || strings.HasPrefix(r.URL.Path, "/api/v1/provision/")) && !limiter.allow(r.RemoteAddr, time.Now()) {
 			fail(w, 429, "request limit reached; retry later")

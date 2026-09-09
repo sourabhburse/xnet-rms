@@ -84,3 +84,36 @@ func (c Config) ValidateTunnel() error {
 	}
 	return nil
 }
+
+// sameOrigin compares browser Origin values as origins rather than raw
+// strings. Browsers normalize scheme/host casing and treat an omitted HTTPS
+// port as equivalent to :443; configuration files and forwarded requests may
+// use either spelling. Paths, queries, fragments and credentials are never
+// part of an allowed origin.
+func sameOrigin(expected, actual string) bool {
+	expectedURL, expectedErr := url.Parse(strings.TrimSpace(expected))
+	actualURL, actualErr := url.Parse(strings.TrimSpace(actual))
+	if expectedErr != nil || actualErr != nil || expectedURL == nil || actualURL == nil {
+		return false
+	}
+	if !strings.EqualFold(expectedURL.Scheme, "https") || !strings.EqualFold(actualURL.Scheme, "https") {
+		return false
+	}
+	if expectedURL.User != nil || actualURL.User != nil || expectedURL.RawQuery != "" || actualURL.RawQuery != "" || expectedURL.Fragment != "" || actualURL.Fragment != "" {
+		return false
+	}
+	if (expectedURL.Path != "" && expectedURL.Path != "/") || (actualURL.Path != "" && actualURL.Path != "/") {
+		return false
+	}
+	if !strings.EqualFold(expectedURL.Hostname(), actualURL.Hostname()) {
+		return false
+	}
+	expectedPort, actualPort := expectedURL.Port(), actualURL.Port()
+	if expectedPort == "" {
+		expectedPort = "443"
+	}
+	if actualPort == "" {
+		actualPort = "443"
+	}
+	return expectedPort == actualPort
+}

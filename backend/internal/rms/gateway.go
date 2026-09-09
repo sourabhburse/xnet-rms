@@ -321,9 +321,13 @@ func (g *Gateway) Handler() http.Handler {
 			fail(w, 403, "session login required")
 			return
 		}
-		if r.Header.Get("Origin") != "" && r.Header.Get("Origin") != "https://"+r.Host {
-			fail(w, 403, "origin rejected")
-			return
+		if origin := r.Header.Get("Origin"); origin != "" {
+			expected := "https://" + r.Host
+			if !sameOrigin(expected, origin) {
+				log.Printf("rms tunnel origin rejected host=%q origin=%q expected=%q path=%s", r.Host, origin, expected, r.URL.Path)
+				fail(w, 403, "origin rejected")
+				return
+			}
 		}
 		g.mu.Lock()
 		p := g.pairs[id]
