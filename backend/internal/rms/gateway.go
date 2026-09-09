@@ -359,6 +359,19 @@ func (g *Gateway) Handler() http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if p == nil && (session.Protocol == "HTTP_LUCI" || session.Protocol == "SSH_LUCI") {
+			// The browser follows /launch immediately. Give the router's
+			// outbound WebSocket a short, bounded window to attach before serving
+			// the first LuCI document. This avoids requiring a manual refresh when
+			// MQTT command delivery and tunnel attachment finish a moment later.
+			deadline := time.Now().Add(10 * time.Second)
+			for p == nil && time.Now().Before(deadline) {
+				time.Sleep(100 * time.Millisecond)
+				g.mu.Lock()
+				p = g.pairs[id]
+				g.mu.Unlock()
+			}
+		}
 		if session.Protocol == "SSH_LUCI" {
 			if p == nil {
 				w.Header().Set("Retry-After", "2")
@@ -399,19 +412,6 @@ func (g *Gateway) Handler() http.Handler {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write(data)
 			return
-		}
-		if p == nil && (session.Protocol == "HTTP_LUCI" || session.Protocol == "SSH_LUCI") {
-			// The browser follows /launch immediately. Give the router's
-			// outbound WebSocket a short, bounded window to attach so LuCI
-			// does not fail its first document request during normal MQTT
-			// and TLS startup latency.
-			deadline := time.Now().Add(10 * time.Second)
-			for p == nil && time.Now().Before(deadline) {
-				time.Sleep(100 * time.Millisecond)
-				g.mu.Lock()
-				p = g.pairs[id]
-				g.mu.Unlock()
-			}
 		}
 		if p == nil {
 			log.Printf("rms tunnel session %s has no router pair path=%s", id, r.URL.Path)
