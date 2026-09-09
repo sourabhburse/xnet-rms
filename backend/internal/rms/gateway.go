@@ -80,8 +80,13 @@ func (g *Gateway) ensureLuciSSH(p *Pair) error {
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return client.Dial("tcp", "127.0.0.1:80")
 			},
-			MaxIdleConns:        8,
-			MaxIdleConnsPerHost: 8,
+			// The OpenWrt uhttpd configuration on the XE33 2S allows three
+			// concurrent requests (max_requests=3).  Letting the browser open
+			// eight SSH direct-tcpip channels at once makes uhttpd reject one of
+			// LuCI's module requests, leaving the page stuck while collecting data.
+			MaxConnsPerHost:     3,
+			MaxIdleConns:        3,
+			MaxIdleConnsPerHost: 3,
 			IdleConnTimeout:     30 * time.Second,
 		}
 		p.mu.Lock()
@@ -169,6 +174,11 @@ func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pai
 	path := r.URL.RequestURI()
 	if path == "/" {
 		path = "/cgi-bin/luci/"
+	} else if strings.HasPrefix(path, "/ubus") && (path == "/ubus" || strings.HasPrefix(path, "/ubus/")) {
+		// LuCI's browser-side RPC client uses /ubus/, while this firmware
+		// exposes the ubus CGI handler below /cgi-bin/luci/admin/ubus.
+		// Keep the browser URL unchanged and translate only the upstream hop.
+		path = "/cgi-bin/luci/admin/ubus" + strings.TrimPrefix(path, "/ubus")
 	}
 	out := r.Clone(r.Context())
 	out.URL = &url.URL{Scheme: "http", Host: "127.0.0.1", Path: path}

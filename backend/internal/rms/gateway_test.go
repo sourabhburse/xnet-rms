@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,27 @@ func TestCacheableLuCIAsset(t *testing.T) {
 	post := &http.Request{Method: http.MethodPost, URL: &url.URL{Path: "/luci-static/resources/luci.js"}}
 	if cacheableLuCIAsset(post, http.StatusOK) {
 		t.Fatal("cached a non-GET request")
+	}
+}
+
+func TestLuciUpstreamPathMapsUbusEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		request, want string
+	}{
+		{"/", "/cgi-bin/luci/"},
+		{"/ubus/?session=1", "/cgi-bin/luci/admin/ubus/?session=1"},
+		{"/ubus", "/cgi-bin/luci/admin/ubus"},
+		{"/luci-static/resources/ui.js?v=1", "/luci-static/resources/ui.js?v=1"},
+	} {
+		path := tc.request
+		if path == "/" {
+			path = "/cgi-bin/luci/"
+		} else if strings.HasPrefix(path, "/ubus") && (path == "/ubus" || strings.HasPrefix(path, "/ubus/")) {
+			path = "/cgi-bin/luci/admin/ubus" + strings.TrimPrefix(path, "/ubus")
+		}
+		if path != tc.want {
+			t.Errorf("upstream path for %q = %q, want %q", tc.request, path, tc.want)
+		}
 	}
 }
 
