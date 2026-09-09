@@ -1,0 +1,199 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ==========================================================================
+   XNET Cloud RMS — design tokens
+   Palette derived from the XNET logo: navy #203864 -> azure #668BCE.
+   ========================================================================== */
+:root {
+  --radius: 0.5rem;
+
+  --background: #f5f6f9;
+  --foreground: #191c23;
+  --card: #ffffff;
+  --card-foreground: #191c23;
+  --popover: #ffffff;
+  --popover-foreground: #191c23;
+
+  --primary: #2e5496;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f4f7;
+  --secondary-foreground: #1f232b;
+  --muted: #f2f4f7;
+  --muted-foreground: #6d7482;
+  --accent: #e9eff8;
+  --accent-foreground: #213c6e;
+  --destructive: #bb2d46;
+  --destructive-foreground: #ffffff;
+
+  --border: #e5e7ec;
+  --input: #e2e4ea;
+  --ring: #2e5496;
+
+  --chart-1: #203864;
+  --chart-2: #2e5496;
+  --chart-3: #5b7fbe;
+  --chart-4: #a7bcde;
+  --chart-5: #668bce;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #545b68;
+  --sidebar-primary: #2e5496;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e9eff8;
+  --sidebar-accent-foreground: #2e5496;
+  --sidebar-border: #e5e7ec;
+  --sidebar-ring: #2e5496;
+
+  /* semantic status */
+  --ok: #1a7f47;
+  --ok-bg: #e9f6ee;
+  --ok-border: #b6e0c5;
+  --down: #bb2d46;
+  --down-bg: #fcecef;
+  --down-border: #f1c5cd;
+  --warn: #a9600c;
+  --warn-bg: #fbf0e2;
+  --warn-border: #eed3b1;
+  --neutral: #5b6472;
+  --neutral-bg: #eef0f3;
+  --neutral-border: #dadde3;
+
+  --brand-navy: #203864;
+  --brand-azure: #668bce;
+}
+
+.dark {
+  --background: #0d0f13;
+  --foreground: #edeef1;
+  --card: #15171d;
+  --card-foreground: #edeef1;
+  --popover: #1a1d24;
+  --popover-foreground: #edeef1;
+
+  --primary: #7ca4e0;
+  --primary-foreground: #0c1220;
+  --secondary: #20242c;
+  --secondary-foreground: #edeef1;
+  --muted: #20242c;
+  --muted-foreground: #99a1ad;
+  --accent: #1f2b44;
+  --accent-foreground: #cdddf6;
+  --destructive: #d15563;
+  --destructive-foreground: #0c1220;
+
+  --border: #282c34;
+  --input: #2c313a;
+  --ring: #7ca4e0;
+
+  --chart-1: #4a6fb0;
+  --chart-2: #6c8fce;
+  --chart-3: #90abdd;
+  --chart-4: #2f4468;
+  --chart-5: #7ca4e0;
+
+  --sidebar: #131519;
+  --sidebar-foreground: #a2a9b4;
+  --sidebar-primary: #7ca4e0;
+  --sidebar-primary-foreground: #0c1220;
+  --sidebar-accent: #1f2b44;
+  --sidebar-accent-foreground: #cdddf6;
+  --sidebar-border: #282c34;
+  --sidebar-ring: #7ca4e0;
+
+  --ok: #6bd299;
+  --ok-bg: #12281c;
+  --ok-border: #24492f;
+  --down: #f0909d;
+  --down-bg: #2e1519;
+  --down-border: #55272e;
+  --warn: #e0b070;
+  --warn-bg: #2c2011;
+  --warn-border: #513c1d;
+  --neutral: #9aa2af;
+  --neutral-bg: #21252d;
+  --neutral-border: #333842;
+
+  --brand-navy: #6c8fce;
+  --brand-azure: #93b2e6;
+}
+
+@theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Sora", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-ok-border: var(--ok-border);
+  --color-down: var(--down);
+  --color-down-bg: var(--down-bg);
+  --color-down-border: var(--down-border);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-warn-border: var(--warn-border);
+  --color-neutral2: var(--neutral);
+  --color-neutral2-bg: var(--neutral-bg);
+  --color-neutral2-border: var(--neutral-border);
+  --color-brand-navy: var(--brand-navy);
+  --color-brand-azure: var(--brand-azure);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* App shell owns the full viewport; Ant screens render inside the workspace slot. */
+.rms-app-root {
+  min-height: 100vh;
+}

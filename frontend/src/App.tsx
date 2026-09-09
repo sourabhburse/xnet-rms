@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Layout, Modal, Space, message } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
-import './rms.css';
+import { toast } from 'sonner';
 import {
   AuditRecord,
   CollectorBundle,
@@ -20,9 +18,11 @@ import {
 import { api, formatApiError, ApiError } from './api';
 
 // Components
-import Navbar from './components/Navbar';
-import Sidebar from './components/Sidebar';
-import StatsBar from './components/StatsBar';
+import { AppShell } from './components/shell/AppShell';
+import { DevicesArea, DEVICE_TAB_VIEWS } from './components/devices/DevicesArea';
+import { Toaster } from './components/ui/sonner';
+import { useTheme } from './lib/use-theme';
+import FleetOverview from './components/overview/FleetOverview';
 import DeviceList from './components/DeviceList';
 import DeviceDetail from './components/DeviceDetail';
 import AddDevices from './components/AddDevices';
@@ -46,7 +46,7 @@ export default function App() {
   const [selectedOrg, setSelectedOrg] = useState<string>('');
   const [organizations, setOrganizations] = useState<Organization[]>([]);
 
-  // Fleet & Device data
+  // Router and device data
   const [devices, setDevices] = useState<Device[]>([]);
   const [totalDevices, setTotalDevices] = useState<number>(0);
   const [page, setPage] = useState<number>(1);
@@ -67,6 +67,7 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [globalError, setGlobalError] = useState<string>('');
+  const { theme, toggle: toggleTheme } = useTheme();
 
   // Initial Auth Verification
   useEffect(() => {
@@ -184,44 +185,39 @@ export default function App() {
   // Remote LuCI Launcher (Server-Side SSH_LUCI)
   const handleOpenLuCI = async (dev: Device) => {
     try {
-      message.loading({ content: `Initiating LuCI session for ${dev.serial_number}...`, key: 'luci' });
+      toast.loading(`Initiating LuCI session for ${dev.serial_number}...`, { id: 'luci' });
       const session = await api<{ id: string; expires_at: string; launch_url: string }>(
         'sessions',
         'POST',
         { device_id: dev.id, protocol: 'SSH_LUCI' }
       );
-      message.success({ content: 'LuCI tunnel ready; router login required.', key: 'luci' });
+      toast.success('LuCI tunnel ready; router login required.', { id: 'luci' });
       window.open(session.launch_url, '_blank');
       refreshData();
     } catch (err) {
       const formatted = formatApiError(err);
-      message.destroy('luci');
-      Modal[formatted.type === 'error' ? 'error' : 'warning']({
-        title: formatted.title,
-        content: formatted.message,
-      });
+      toast.dismiss('luci');
+      const notify = formatted.type === 'error' ? toast.error : toast.warning;
+      notify(formatted.title, { description: formatted.message });
     }
   };
 
   // Remote Web Terminal Launcher (TERMINAL_SSH)
   const handleOpenTerminal = async (dev: Device) => {
     try {
-      message.loading({ content: `Opening terminal for ${dev.serial_number}...`, key: 'term' });
+      toast.loading(`Opening terminal for ${dev.serial_number}...`, { id: 'term' });
       const session = await api<{ id: string; expires_at: string; launch_url: string }>(
         'sessions',
         'POST',
         { device_id: dev.id, protocol: 'TERMINAL_SSH' }
       );
-      message.success({ content: 'Terminal session authorized!', key: 'term' });
+      toast.success('Terminal session authorized!', { id: 'term' });
       window.open(session.launch_url, '_blank');
       refreshData();
     } catch (err) {
       const formatted = formatApiError(err);
-      message.destroy('term');
-      Modal.error({
-        title: formatted.title,
-        content: formatted.message,
-      });
+      toast.dismiss('term');
+      toast.error(formatted.title, { description: formatted.message });
     }
   };
 
@@ -236,8 +232,8 @@ export default function App() {
   // Unauthenticated: Show NCMS-inspired Login Screen
   if (loadingUser) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f3f3f3' }}>
-        <p style={{ color: '#696969' }}>Loading XNET RMS...</p>
+      <div className="grid min-h-screen place-items-center bg-background">
+        <p className="text-sm text-muted-foreground">Loading XNET RMS...</p>
       </div>
     );
   }
@@ -250,56 +246,84 @@ export default function App() {
   const awaitingCount = registrations.filter(r => r.status === 'awaiting_device').length;
   const pendingCount = pendingDevices.length;
 
+  const activeSessionCount = sessions.filter(s => !s.closed_at).length;
+  const deviceTotal = stats.total || totalDevices;
+
+  const orgName =
+    organizations.find(o => o.id === (selectedOrg || user.organization_id))?.name ||
+    (user.role === 'SUPER_ADMIN' ? 'All customers' : 'Workspace');
+
+  const viewTitles: Record<string, string> = {
+    dashboard: 'Overview',
+    devices: 'Devices',
+    groups: 'Devices',
+    'add-devices': 'Devices',
+    'available-to-claim': 'Devices',
+    'registration-requests': 'Devices',
+    sessions: 'Sessions',
+    tags: 'Customer tags',
+    users: 'Users',
+    'enrollment-tokens': 'Enrollment tokens',
+    profiles: 'Monitoring templates',
+    'audit-logs': 'Audit records',
+    organizations: 'Customers',
+    bundles: 'Collector bundles',
+  };
+
+  const crumb = selectedDevice ? (
+    <>
+      <span>Devices</span>
+      <span className="mx-1.5 text-muted-foreground">/</span>
+      <b>{selectedDevice.name || selectedDevice.serial_number}</b>
+    </>
+  ) : (
+    <b>{viewTitles[view] || 'Overview'}</b>
+  );
+
+  const isDeviceTabView = (DEVICE_TAB_VIEWS as readonly string[]).includes(view);
+
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sidebar
+    <>
+      <AppShell
         user={user}
+        orgName={orgName}
+        organizations={organizations}
+        selectedOrg={selectedOrg}
+        onSelectOrg={orgId => {
+          setSelectedOrg(orgId);
+          setPage(1);
+        }}
         currentView={view}
         onSelectView={viewKey => {
           setView(viewKey);
           setSelectedDevice(null);
           setPage(1);
         }}
-        pendingCount={pendingCount}
-        awaitingCount={awaitingCount}
-      />
+        counts={{ devices: deviceTotal, sessions: activeSessionCount }}
+        crumb={crumb}
+        searchValue={searchQuery}
+        onSearchChange={setSearchQuery}
+        onSearchSubmit={value => {
+          setSearchQuery(value);
+          setView('devices');
+          setSelectedDevice(null);
+          setPage(1);
+        }}
+        onRefresh={refreshData}
+        refreshing={refreshing}
+        onSignOut={handleSignOut}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      >
+        {globalError && (
+          <div className="mx-6 mt-5 flex items-start justify-between gap-4 rounded-lg border border-down-border bg-down-bg px-3.5 py-3 text-[13px] text-down">
+            <span>{globalError}</span>
+            <button type="button" className="font-medium underline underline-offset-2" onClick={() => setGlobalError('')}>Dismiss</button>
+          </div>
+        )}
 
-      <Layout style={{ background: '#f3f3f3' }}>
-        <Navbar
-          user={user}
-          organizations={organizations}
-          selectedOrg={selectedOrg}
-          onSelectOrg={orgId => {
-            setSelectedOrg(orgId);
-            setPage(1);
-          }}
-          onRefresh={refreshData}
-          refreshing={refreshing}
-          onSignOut={handleSignOut}
-          searchQuery={searchQuery}
-          onSearchChange={value => setSearchQuery(value)}
-          onSearchSubmit={value => {
-            setSearchQuery(value);
-            setView('devices');
-            setSelectedDevice(null);
-            setPage(1);
-          }}
-        />
-
-        <Layout.Content className="rms-content">
-          {globalError && (
-            <Alert
-              type="error"
-              message={globalError}
-              showIcon
-              closable
-              style={{ marginBottom: 20 }}
-              onClose={() => setGlobalError('')}
-            />
-          )}
-
-          {/* If a device is selected, show detail view */}
-          {selectedDevice ? (
+        {selectedDevice ? (
+          <div className="p-6">
             <DeviceDetail
               device={selectedDevice}
               user={user}
@@ -309,200 +333,149 @@ export default function App() {
               }}
               onRefreshDevice={refreshData}
             />
-          ) : (
-            <>
-              {/* Dashboard / Fleet Overview */}
-              {view === 'dashboard' && (
-                <div>
-                  <div className="page-header">
-                    <div>
-                      <h1 className="page-title">Fleet Overview</h1>
-                      <div className="page-subtitle">A live view of connectivity, ownership, and router health.</div>
-                    </div>
-                    <Space>
-                      {(user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN') && (
-                        <Button type="primary" icon={<PlusOutlined />} onClick={() => setView('add-devices')}>
-                          Add device
-                        </Button>
-                      )}
-                      <span className="page-context">Updated {refreshing ? 'now' : 'just now'}</span>
-                    </Space>
-                  </div>
-
-                  <StatsBar
-                    stats={stats}
-                    pendingCount={pendingCount}
-                    awaitingCount={awaitingCount}
-                    onSelectFilter={setStatusFilter}
-                    onNavigate={v => setView(v)}
-                  />
-
-                  <DeviceList
-                    user={user}
-                    devices={devices}
-                    total={totalDevices}
-                    page={page}
-                    loading={loading || refreshing}
-                    tags={tags}
-                    searchQuery={searchQuery}
-                    selectedTag={selectedTag}
-                    statusFilter={statusFilter}
-                    onSearchChange={q => {
-                      setSearchQuery(q);
-                      setPage(1);
-                    }}
-                    onTagChange={t => {
-                      setSelectedTag(t);
-                      setPage(1);
-                    }}
-                    onStatusChange={s => {
-                      setStatusFilter(s);
-                      setPage(1);
-                    }}
-                    onPageChange={setPage}
-                    onSelectDevice={setSelectedDevice}
-                    onOpenLuCI={handleOpenLuCI}
-                    onOpenTerminal={handleOpenTerminal}
-                  />
-                </div>
-              )}
-
-              {/* Device Fleet View */}
-              {view === 'devices' && (
-                <div>
-                  <div className="page-header">
-                    <div>
-                      <h1 className="page-title">Device Fleet Inventory</h1>
-                      <div className="page-subtitle">All enrolled routers reporting telemetry to RMS.</div>
-                    </div>
-                    {(user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN') && (
-                      <Button type="primary" icon={<PlusOutlined />} onClick={() => setView('add-devices')}>
-                        Add device
-                      </Button>
-                    )}
-                  </div>
-
-                  <DeviceList
-                    user={user}
-                    devices={devices}
-                    total={totalDevices}
-                    page={page}
-                    loading={loading || refreshing}
-                    tags={tags}
-                    searchQuery={searchQuery}
-                    selectedTag={selectedTag}
-                    statusFilter={statusFilter}
-                    onSearchChange={q => {
-                      setSearchQuery(q);
-                      setPage(1);
-                    }}
-                    onTagChange={t => {
-                      setSelectedTag(t);
-                      setPage(1);
-                    }}
-                    onStatusChange={s => {
-                      setStatusFilter(s);
-                      setPage(1);
-                    }}
-                    onPageChange={setPage}
-                    onSelectDevice={setSelectedDevice}
-                    onOpenLuCI={handleOpenLuCI}
-                    onOpenTerminal={handleOpenTerminal}
-                  />
-                </div>
-              )}
-
-              {/* Add Devices */}
-              {view === 'groups' && (
-                <GroupsManager
-                  user={user}
-                  organizations={organizations}
-                  groups={groups}
-                  selectedOrg={selectedOrg}
-                  devices={devices}
-                  onRefresh={refreshData}
-                />
-              )}
-
-              {/* Add Devices */}
-              {view === 'add-devices' && (
-                <AddDevices
-                  user={user}
-                  organizations={organizations}
-                  tags={tags}
-                  selectedOrg={selectedOrg}
-                  onSuccess={() => {
-                    refreshData();
-                    setView('registration-requests');
-                  }}
-                  onRefreshTags={refreshData}
-                />
-              )}
-
-              {/* Available to Claim */}
-              {view === 'available-to-claim' && (
-                <AvailableToClaim
-                  user={user}
-                  pendingDevices={pendingDevices}
-                  loading={loading || refreshing}
-                  tags={tags}
-                  selectedOrg={selectedOrg}
-                  onRefresh={refreshData}
-                />
-              )}
-
-              {/* Registration Requests */}
-              {view === 'registration-requests' && (
-                <RegistrationRequests
-                  user={user}
-                  registrations={registrations}
-                  loading={loading || refreshing}
-                  tags={tags}
-                  selectedOrg={selectedOrg}
-                  onRefresh={refreshData}
-                />
-              )}
-
-              {/* Customer Tags */}
-              {view === 'tags' && (
-                <TagsManager
-                  user={user}
-                  tags={tags}
-                  organizations={organizations}
-                  selectedOrg={selectedOrg}
-                  loading={loading || refreshing}
-                  onRefresh={refreshData}
-                />
-              )}
-
-              {/* Remote Sessions */}
-              {view === 'sessions' && (
-                <SessionsManager
-                  user={user}
-                  sessions={sessions}
-                  devices={devices}
-                  loading={loading || refreshing}
-                  onRefresh={refreshData}
-                />
-              )}
-
-              {/* Admin Views */}
-              {['users', 'enrollment-tokens', 'organizations', 'profiles', 'bundles', 'audit-logs'].includes(view) && (
-                <AdminViews
-                  view={view}
-                  currentUser={user}
-                  data={adminData}
-                  organizations={organizations}
-                  groups={groups}
-                  selectedOrg={selectedOrg}
-                  loading={loading || refreshing}
-                  onRefresh={refreshData}
-                />
-              )}
-            </>
-          )}
-        </Layout.Content>
-      </Layout>
-    </Layout>
+          </div>
+        ) : view === 'dashboard' ? (
+          <FleetOverview
+            stats={stats}
+            pendingCount={pendingCount}
+            awaitingCount={awaitingCount}
+            sessions={sessions}
+            groups={groups}
+            devices={devices}
+            user={user}
+            onNavigate={v => setView(v)}
+            onSelectFilter={s => {
+              setStatusFilter(s);
+              setView('devices');
+            }}
+            onOpenLuCI={handleOpenLuCI}
+            onOpenTerminal={handleOpenTerminal}
+          />
+        ) : isDeviceTabView ? (
+          <DevicesArea
+            user={user}
+            currentView={view}
+            onSelectView={v => {
+              setView(v);
+              setPage(1);
+            }}
+            counts={{
+              devices: deviceTotal,
+              groups: groups.length,
+              awaiting: awaitingCount,
+              unclaimed: pendingCount,
+            }}
+          >
+            {view === 'devices' && (
+              <DeviceList
+                user={user}
+                devices={devices}
+                total={totalDevices}
+                page={page}
+                loading={loading || refreshing}
+                tags={tags}
+                searchQuery={searchQuery}
+                selectedTag={selectedTag}
+                statusFilter={statusFilter}
+                onSearchChange={q => {
+                  setSearchQuery(q);
+                  setPage(1);
+                }}
+                onTagChange={t => {
+                  setSelectedTag(t);
+                  setPage(1);
+                }}
+                onStatusChange={s => {
+                  setStatusFilter(s);
+                  setPage(1);
+                }}
+                onPageChange={setPage}
+                onSelectDevice={setSelectedDevice}
+                onOpenLuCI={handleOpenLuCI}
+                onOpenTerminal={handleOpenTerminal}
+              />
+            )}
+            {view === 'groups' && (
+              <GroupsManager
+                user={user}
+                organizations={organizations}
+                groups={groups}
+                selectedOrg={selectedOrg}
+                devices={devices}
+                onRefresh={refreshData}
+              />
+            )}
+            {view === 'add-devices' && (
+              <AddDevices
+                user={user}
+                organizations={organizations}
+                tags={tags}
+                selectedOrg={selectedOrg}
+                onSuccess={() => {
+                  refreshData();
+                  setView('registration-requests');
+                }}
+                onRefreshTags={refreshData}
+              />
+            )}
+            {view === 'available-to-claim' && (
+              <AvailableToClaim
+                user={user}
+                pendingDevices={pendingDevices}
+                loading={loading || refreshing}
+                tags={tags}
+                selectedOrg={selectedOrg}
+                onRefresh={refreshData}
+              />
+            )}
+            {view === 'registration-requests' && (
+              <RegistrationRequests
+                user={user}
+                registrations={registrations}
+                loading={loading || refreshing}
+                tags={tags}
+                selectedOrg={selectedOrg}
+                onRefresh={refreshData}
+              />
+            )}
+          </DevicesArea>
+        ) : (
+          <div className="p-6">
+            {view === 'tags' && (
+              <TagsManager
+                user={user}
+                tags={tags}
+                organizations={organizations}
+                selectedOrg={selectedOrg}
+                loading={loading || refreshing}
+                onRefresh={refreshData}
+              />
+            )}
+            {view === 'sessions' && (
+              <SessionsManager
+                user={user}
+                sessions={sessions}
+                devices={devices}
+                loading={loading || refreshing}
+                onRefresh={refreshData}
+              />
+            )}
+            {['users', 'enrollment-tokens', 'organizations', 'profiles', 'bundles', 'audit-logs'].includes(view) && (
+              <AdminViews
+                view={view}
+                currentUser={user}
+                data={adminData}
+                organizations={organizations}
+                groups={groups}
+                selectedOrg={selectedOrg}
+                loading={loading || refreshing}
+                onRefresh={refreshData}
+              />
+            )}
+          </div>
+        )}
+      </AppShell>
+      <Toaster />
+    </>
   );
 }

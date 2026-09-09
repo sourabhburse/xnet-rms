@@ -1,6 +1,24 @@
 import { Terminal } from "xterm";
+import "./styles/globals.css";
+import "./terminal.css";
 import "xterm/css/xterm.css";
-const terminal = new Terminal({ cols: 100, rows: 30, cursorBlink: true });
+const styles = getComputedStyle(document.documentElement);
+const token = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback;
+const terminal = new Terminal({
+  cols: 100,
+  rows: 30,
+  cursorBlink: true,
+  theme: {
+    background: token("--card", "#ffffff"),
+    foreground: token("--foreground", "#191c23"),
+    cursor: token("--primary", "#2e5496"),
+    selectionBackground: token("--accent", "#e9eff8"),
+    black: token("--foreground", "#191c23"),
+    brightBlack: token("--muted-foreground", "#6d7482"),
+    blue: token("--primary", "#2e5496"),
+    brightBlue: token("--brand-azure", "#668bce"),
+  },
+});
 terminal.open(document.getElementById("terminal")!);
 let socket: WebSocket | null = null;
 let opened = false;

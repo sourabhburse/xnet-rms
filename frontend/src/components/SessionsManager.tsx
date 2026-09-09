@@ -1,150 +1,30 @@
-import React, { useState } from 'react';
-import {
-  Button,
-  Card,
-  Empty,
-  Modal,
-  Space,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
-import { DisconnectOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Device, SessionItem, User } from '../types';
-import { api, formatApiError } from '../api';
+import React, { useState } from "react";
+import { Cable, Clock3, RefreshCw, Router, XCircle } from "lucide-react";
+import { toast } from "sonner";
 
-interface SessionsManagerProps {
-  user: User;
-  sessions: SessionItem[];
-  devices: Device[];
-  loading: boolean;
-  onRefresh: () => void;
-}
+import { Device, SessionItem, User } from "../types";
+import { api, formatApiError } from "../api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-export default function SessionsManager({
-  user,
-  sessions,
-  devices,
-  loading,
-  onRefresh,
-}: SessionsManagerProps) {
+interface SessionsManagerProps { user: User; sessions: SessionItem[]; devices: Device[]; loading: boolean; onRefresh: () => void; }
+
+export default function SessionsManager({ sessions, devices, loading, onRefresh }: SessionsManagerProps) {
   const [closingId, setClosingId] = useState<string | null>(null);
-
-  const handleCloseSession = (sessionId: string) => {
-    Modal.confirm({
-      title: 'Terminate remote session?',
-      content: 'The active connection will be dropped immediately.',
-      okText: 'Close Session',
-      okType: 'danger',
-      onOk: async () => {
-        setClosingId(sessionId);
-        try {
-          await api(`sessions/${sessionId}`, 'DELETE');
-          message.success('Session closed successfully');
-          onRefresh();
-        } catch (err) {
-          const formatted = formatApiError(err);
-          message.error(formatted.message);
-        } finally {
-          setClosingId(null);
-        }
-      },
-    });
+  const [closeTarget, setCloseTarget] = useState<SessionItem | null>(null);
+  const getDeviceSerial = (deviceId: string) => devices.find((device) => device.id === deviceId)?.serial_number || deviceId;
+  const closeSession = async () => {
+    if (!closeTarget) return;
+    setClosingId(closeTarget.id);
+    try { await api(`sessions/${closeTarget.id}`, "DELETE"); toast.success("Session closed successfully"); setCloseTarget(null); onRefresh(); }
+    catch (err) { toast.error(formatApiError(err).message); } finally { setClosingId(null); }
   };
 
-  const getDeviceSerial = (deviceId: string) => {
-    const d = devices.find(x => x.id === deviceId);
-    return d ? d.serial_number : deviceId;
-  };
-
-  return (
-    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-      <div className="page-header">
-        <div>
-          <Typography.Title level={3} className="page-title">
-            Active Remote Sessions
-          </Typography.Title>
-          <div className="page-subtitle">
-            Currently active SSH tunnels and LuCI proxy sessions across your fleet (system capacity: 25 concurrent).
-          </div>
-        </div>
-
-        <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
-          Refresh
-        </Button>
-      </div>
-
-      <Card className="rms-card" bordered={false}>
-        <Table<SessionItem>
-          rowKey="id"
-          className="rms-table"
-          loading={loading}
-          dataSource={sessions}
-          columns={[
-            {
-              title: 'Device Serial Number',
-              dataIndex: 'device_id',
-              key: 'device_id',
-              render: (id: string) => (
-                <span className="code-font" style={{ fontWeight: 600 }}>
-                  {getDeviceSerial(id)}
-                </span>
-              ),
-            },
-            {
-              title: 'Protocol',
-              dataIndex: 'protocol',
-              key: 'protocol',
-              render: (p: string) => {
-                let color = 'blue';
-                if (p === 'SSH_LUCI') color = 'cyan';
-                if (p === 'TERMINAL_SSH') color = 'purple';
-                return <Tag color={color}>{p}</Tag>;
-              },
-            },
-            {
-              title: 'Session ID',
-              dataIndex: 'id',
-              key: 'id',
-              render: (id: string) => (
-                <span className="code-font" style={{ fontSize: 11, color: '#64748b' }}>
-                  {id}
-                </span>
-              ),
-            },
-            {
-              title: 'Expires At',
-              dataIndex: 'expires_at',
-              key: 'expires_at',
-              render: (t: string) => (t ? new Date(t).toLocaleTimeString() : '—'),
-            },
-            {
-              title: 'Actions',
-              key: 'actions',
-              render: (_, record: SessionItem) => (
-                <Button
-                  size="small"
-                  danger
-                  icon={<DisconnectOutlined />}
-                  loading={closingId === record.id}
-                  onClick={() => handleCloseSession(record.id)}
-                >
-                  Close Session
-                </Button>
-              ),
-            },
-          ]}
-          locale={{
-            emptyText: (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="No active remote sessions currently open"
-              />
-            ),
-          }}
-        />
-      </Card>
-    </div>
-  );
+  return <div className="mx-auto flex max-w-[1200px] flex-col gap-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="font-display text-[20px] font-semibold">Active remote sessions</h1><p className="mt-1 text-[13px] text-muted-foreground">SSH tunnels and LuCI proxy sessions across connected routers · system capacity: 25 concurrent.</p></div><Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}><RefreshCw className={loading ? "size-3.5 animate-spin" : "size-3.5"} />Refresh</Button></div>
+    <Card><CardHeader className="border-b border-border"><CardTitle className="flex items-center gap-2"><Cable className="size-4 text-primary" />Remote sessions</CardTitle><CardDescription>{sessions.length} session{sessions.length === 1 ? "" : "s"} currently tracked.</CardDescription></CardHeader><CardContent className="p-0">{loading ? <div className="p-8 text-center text-xs text-muted-foreground">Loading sessions…</div> : sessions.length ? <Table><TableHeader><TableRow><TableHead>Device</TableHead><TableHead>Protocol</TableHead><TableHead>Session ID</TableHead><TableHead>Expires</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader><TableBody>{sessions.map((session) => <TableRow key={session.id}><TableCell><div className="flex items-center gap-2"><Router className="size-4 text-primary" /><span className="font-mono text-[11px] font-semibold">{getDeviceSerial(session.device_id)}</span></div></TableCell><TableCell><Badge variant={session.protocol === "TERMINAL_SSH" ? "accent" : "secondary"} className="font-normal">{session.protocol === "SSH_LUCI" ? "LuCI" : session.protocol === "TERMINAL_SSH" ? "Terminal SSH" : session.protocol}</Badge></TableCell><TableCell className="max-w-[200px] truncate font-mono text-[10.5px] text-muted-foreground" title={session.id}>{session.id}</TableCell><TableCell><span className="flex items-center gap-1.5 font-mono text-[10.5px] text-muted-foreground"><Clock3 className="size-3.5" />{session.expires_at ? new Date(session.expires_at).toLocaleTimeString() : "—"}</span></TableCell><TableCell className="text-right"><Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={closingId === session.id} onClick={() => setCloseTarget(session)}><XCircle className="size-3.5" />Close session</Button></TableCell></TableRow>)}</TableBody></Table> : <div className="flex min-h-36 flex-col items-center justify-center gap-1 p-6 text-center"><Cable className="mb-1 size-5 text-muted-foreground/50" /><p className="text-[13px] font-medium">No active remote sessions</p><p className="text-xs text-muted-foreground">Sessions opened from LuCI or terminal will appear here.</p></div>}</CardContent></Card>
+    <ConfirmDialog open={!!closeTarget} onOpenChange={(open) => !open && setCloseTarget(null)} title="Terminate remote session?" description="The active connection will be dropped immediately." confirmLabel="Close session" onConfirm={closeSession} />
+  </div>;
 }
