@@ -636,8 +636,8 @@ export default function AdminViews({
                 dataIndex: 'action',
                 render: a => <Tag color="geekblue">{a}</Tag>,
               },
-              { title: 'Target ID', dataIndex: 'target_id', render: id => <span className="code-font">{id}</span> },
-              { title: 'Actor ID', dataIndex: 'actor_id', render: id => <span className="code-font">{id}</span> },
+              { title: 'Target ID', dataIndex: 'resource_id', render: id => <span className="code-font">{id}</span> },
+              { title: 'Actor ID', dataIndex: 'user_id', render: id => <span className="code-font">{id || 'system'}</span> },
             ]}
           />
         </Card>

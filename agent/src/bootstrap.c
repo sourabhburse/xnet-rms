@@ -264,7 +264,7 @@ int perform_provision_checkin(void){
     if(time(NULL)<1577836800){strcpy(rms_http_error,"clock_failure");return -1;}
     if(!g_cfg.serial[0]||strlen(g_cfg.mac_address)!=17){strcpy(rms_http_error,"invalid_identity");return -1;}
     if(generate_ec_p256_key_if_missing()!=0){strcpy(rms_http_error,"identity_key_failure");return -1;}
-    if(rms_id(g_cfg.device_id))return rms_refresh_certificate();
+    if(rms_id(g_cfg.device_id)&&g_cfg.mqtt_host[0])return rms_refresh_certificate();
     char *csr=generate_csr_pem();if(!csr)return -1;
     JSON_Value *v=json_value_init_object();JSON_Object *o=json_value_get_object(v);json_object_set_string(o,"csr",csr);
     char *b=json_serialize_to_string(v);json_value_free(v);char url[256];snprintf(url,sizeof(url),"%s/api/v1/provision/bootstrap/challenge",g_cfg.server_url);
@@ -281,7 +281,7 @@ int perform_provision_checkin(void){
     if(state&&strcmp(state,"claimed")){snprintf(rms_http_error,sizeof(rms_http_error),"%s",state);json_value_free(v);return 1;}
     id=json_object_get_string(o,"device_id");const char *cert=json_object_get_string(o,"certificate"),*host=json_object_get_string(o,"mqtt_host"),*org=json_object_get_string(o,"organization_name");int port=json_object_get_number(o,"mqtt_port");
     int rc=-1;if(rms_id(id)&&host&&strlen(host)<sizeof(g_cfg.mqtt_host)&&port>0&&port<=65535&&install_certificate(cert,id)==0){char portstr[8];snprintf(portstr,sizeof(portstr),"%d",port);
-        if(save_config_option("general","device_id",id)==0&&save_config_option("general","mqtt_host",host)==0&&save_config_option("general","mqtt_port",portstr)==0&&save_config_option("general","organization_name",org?org:"")==0&&save_config_option("general","enrollment_token","")==0)rc=0;
+        if(save_provisioned_config(id,host,portstr,org?org:"")==0)rc=0;
     }
     json_value_free(v);return rc;
 }

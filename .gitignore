@@ -17,3 +17,5 @@ artifacts/*/IPKG_BUILD.*/
 artifacts/rms-server-smoke
 artifacts/rms-ws-proxy
 docs/superpowers/
+/graphify-out/
+.graphify_detect.json

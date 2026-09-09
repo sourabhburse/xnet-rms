@@ -145,9 +145,9 @@ export interface EnrollmentToken {
 export interface AuditRecord {
   id: string;
   organization_id: string;
-  actor_id: string;
+  user_id: string | null;
   action: string;
-  target_id: string;
+  resource_id: string;
   created_at: string;
 }
 

@@ -21,10 +21,22 @@ static int running;
 static int s_mounted=0;
 static char active_session_id[33];
 
+static int write_all(int fd, const void *data, size_t len) {
+    const char *p = data;
+    while (len > 0) {
+        ssize_t n = write(fd, p, len);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return -1;
+        p += n;
+        len -= (size_t)n;
+    }
+    return 0;
+}
+
 int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
     if (!rms_id(session_id) || !pubkey || strlen(pubkey) > 1024) return -1;
-    mkdir(RMS_SSH_RAM_DIR, 0700);
-    chmod(RMS_SSH_RAM_DIR, 0700);
+    if (mkdir(RMS_SSH_RAM_DIR, 0700) != 0 && errno != EEXIST) return -1;
+    if (chmod(RMS_SSH_RAM_DIR, 0700) != 0) return -1;
 
     char tmp[256];
     snprintf(tmp, sizeof(tmp), "%s/authorized_keys.tmp", RMS_SSH_RAM_DIR);
@@ -37,14 +49,23 @@ int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
         char buf[512];
         ssize_t n;
         while ((n = read(orig_fd, buf, sizeof(buf))) > 0) {
-            if (write(fd, buf, n) != n) break;
+            if (write_all(fd, buf, (size_t)n) != 0) {
+                close(orig_fd);
+                close(fd);
+                unlink(tmp);
+                return -1;
+            }
         }
         close(orig_fd);
-        if (write(fd, "\n", 1) != 1) {}
+        if (n < 0 || write_all(fd, "\n", 1) != 0) {
+            close(fd);
+            unlink(tmp);
+            return -1;
+        }
     }
 
     size_t len = strlen(pubkey);
-    if (write(fd, pubkey, len) != (ssize_t)len || write(fd, "\n", 1) != 1) {
+    if (write_all(fd, pubkey, len) != 0 || write_all(fd, "\n", 1) != 0) {
         close(fd);
         unlink(tmp);
         return -1;
@@ -56,9 +77,12 @@ int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
         return -1;
     }
 
-    if (mount(RMS_SSH_RAM_KEYS, DROPBEAR_AUTH_KEYS, NULL, MS_BIND, NULL) == 0) {
-        s_mounted = 1;
+    if (mount(RMS_SSH_RAM_KEYS, DROPBEAR_AUTH_KEYS, NULL, MS_BIND, NULL) != 0) {
+        unlink(RMS_SSH_RAM_KEYS);
+        rmdir(RMS_SSH_RAM_DIR);
+        return -1;
     }
+    s_mounted = 1;
     return 0;
 }
 

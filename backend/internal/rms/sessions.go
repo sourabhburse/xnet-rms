@@ -41,6 +41,34 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := actor(r)
+	id, ticket := randomID(), secret()
+	expires := time.Now().Add(15 * time.Minute)
+	needsSSH := req.Protocol == "TERMINAL_SSH" || req.Protocol == "SSH_LUCI"
+	var pubSSH string
+	var privPEM []byte
+	expiredSessionIDs := []string{}
+	if needsSSH {
+		var err error
+		privPEM, pubSSH, _, err = generateSSHKeypair(id)
+		if err != nil {
+			fail(w, 500, "failed to generate session key")
+			return
+		}
+		// Keep the key available before the session is committed. If any
+		// database step fails, the deferred cleanup below removes it again.
+		s.sshKeys.Store(id, string(privPEM))
+	}
+	committed := false
+	defer func() {
+		if needsSSH && !committed {
+			s.sshKeys.Delete(id)
+		}
+		if committed {
+			for _, expiredID := range expiredSessionIDs {
+				s.sshKeys.Delete(expiredID)
+			}
+		}
+	}()
 	tx, e := s.DB.Begin()
 	if e != nil {
 		fail(w, 503, "sessions unavailable")
@@ -52,7 +80,7 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "sessions unavailable")
 		return
 	}
-	_, e = tx.Exec("UPDATE sessions SET closed_at=now() WHERE closed_at IS NULL AND expires_at<=now()")
+	expiredSessionIDs, e = expireSessions(tx)
 	if e != nil {
 		fail(w, 503, "sessions unavailable")
 		return
@@ -70,28 +98,20 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "device unavailable")
 		return
 	}
-	id, ticket := randomID(), secret()
-	expires := time.Now().Add(15 * time.Minute)
 	_, e = tx.Exec("INSERT INTO sessions(id,device_id,user_id,protocol,ticket_hash,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, req.DeviceID, a.ID, req.Protocol, digest(ticket), expires)
 	if e != nil {
 		fail(w, 409, "router busy")
 		return
 	}
-	if e = audit(tx, org, a.ID, "session.open", id); e != nil || tx.Commit() != nil {
+	if e = audit(tx, org, a.ID, "session.open", id); e != nil {
 		fail(w, 503, "session creation failed")
 		return
 	}
-	var pubSSH string
-	var privPEM []byte
-	if req.Protocol == "TERMINAL_SSH" || req.Protocol == "SSH_LUCI" {
-		var err error
-		privPEM, pubSSH, _, err = generateSSHKeypair(id)
-		if err != nil {
-			fail(w, 500, "failed to generate session key")
-			return
-		}
-		s.sshKeys.Store(id, string(privPEM))
+	if e = tx.Commit(); e != nil {
+		fail(w, 503, "session creation failed")
+		return
 	}
+	committed = true
 	gateway := "https://" + s.Config.TunnelDomain + ":" + s.Config.TunnelPort
 	command := map[string]any{"action": "open_session", "session_id": id, "protocol": req.Protocol, "expires_at": expires.Unix(), "gateway_url": gateway}
 	if pubSSH != "" {
@@ -139,7 +159,6 @@ func (s *Core) closeSession(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) finishSession(id string) error { return s.finishSessionAs(id, "") }
 func (s *Core) finishSessionAs(id, closer string) error {
-	s.sshKeys.Delete(id)
 	tx, e := s.DB.Begin()
 	if e != nil {
 		return e
@@ -151,6 +170,7 @@ func (s *Core) finishSessionAs(id, closer string) error {
 	var user, device, org string
 	e = tx.QueryRow("UPDATE sessions SET closed_at=now() WHERE id=$1 AND closed_at IS NULL RETURNING user_id,device_id", id).Scan(&user, &device)
 	if e == sql.ErrNoRows {
+		s.sshKeys.Delete(id)
 		return nil
 	}
 	if e != nil {
@@ -162,6 +182,7 @@ func (s *Core) finishSessionAs(id, closer string) error {
 	if e = tx.Commit(); e != nil {
 		return e
 	}
+	s.sshKeys.Delete(id)
 
 	// Closing the browser already tears down the gateway websocket, but the
 	// router-side worker may still be alive until it observes that close. Send
@@ -173,6 +194,89 @@ func (s *Core) finishSessionAs(id, closer string) error {
 			"action":     "close_session",
 			"session_id": id,
 		})
+	}
+	return nil
+}
+
+func closeSessions(tx *sql.Tx, column, value string) ([]string, error) {
+	var query string
+	switch column {
+	case "user_id", "device_id":
+		query = "SELECT id FROM sessions WHERE " + column + "=$1 AND closed_at IS NULL FOR UPDATE"
+	default:
+		return nil, fmt.Errorf("unsupported session filter %q", column)
+	}
+	rows, e := tx.Query(query, value)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			return nil, e
+		}
+		ids = append(ids, id)
+	}
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	if e = rows.Close(); e != nil {
+		return nil, e
+	}
+	if _, e = tx.Exec("UPDATE sessions SET closed_at=now() WHERE "+column+"=$1 AND closed_at IS NULL", value); e != nil {
+		return nil, e
+	}
+	return ids, nil
+}
+
+func expireSessions(tx *sql.Tx) ([]string, error) {
+	rows, e := tx.Query("UPDATE sessions SET closed_at=now() WHERE closed_at IS NULL AND expires_at<=now() RETURNING id")
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			return nil, e
+		}
+		ids = append(ids, id)
+	}
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	if e = rows.Close(); e != nil {
+		return nil, e
+	}
+	return ids, nil
+}
+
+func (s *Core) expireSessions() error {
+	rows, e := s.DB.Query("UPDATE sessions SET closed_at=now() WHERE closed_at IS NULL AND expires_at<=now() RETURNING id")
+	if e != nil {
+		return e
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			rows.Close()
+			return e
+		}
+		ids = append(ids, id)
+	}
+	if e = rows.Err(); e != nil {
+		rows.Close()
+		return e
+	}
+	if e = rows.Close(); e != nil {
+		return e
+	}
+	for _, id := range ids {
+		s.sshKeys.Delete(id)
 	}
 	return nil
 }

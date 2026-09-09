@@ -398,17 +398,36 @@ func (s *Core) disableUser(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "cannot disable yourself")
 		return
 	}
-	res, e := s.DB.Exec("UPDATE users SET disabled=true WHERE id=$1 AND role<>'SUPER_ADMIN' AND ($2='SUPER_ADMIN' OR organization_id=$3)", id, a.Role, a.Org)
+	tx, e := s.DB.Begin()
 	if e != nil {
 		fail(w, 503, "update unavailable")
 		return
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	defer tx.Rollback()
+	var org sql.NullString
+	e = tx.QueryRow("UPDATE users SET disabled=true WHERE id=$1 AND role<>'SUPER_ADMIN' AND ($2='SUPER_ADMIN' OR organization_id=$3) RETURNING organization_id", id, a.Role, a.Org).Scan(&org)
+	if e == sql.ErrNoRows {
 		fail(w, 404, "user not found")
 		return
 	}
-	s.DB.Exec("UPDATE sessions SET closed_at=now() WHERE user_id=$1 AND closed_at IS NULL", id)
+	if e != nil {
+		fail(w, 503, "update unavailable")
+		return
+	}
+	sessionIDs, e := closeSessions(tx, "user_id", id)
+	if e == nil {
+		e = audit(tx, org.String, a.ID, "user.disable", id)
+	}
+	if e == nil {
+		e = tx.Commit()
+	}
+	if e != nil {
+		fail(w, 503, "update unavailable")
+		return
+	}
+	for _, sessionID := range sessionIDs {
+		s.sshKeys.Delete(sessionID)
+	}
 	output(w, 200, map[string]bool{"disabled": true})
 }
 func (s *Core) tokens(w http.ResponseWriter, r *http.Request) {
@@ -520,12 +539,20 @@ func (s *Core) revoke(w http.ResponseWriter, r *http.Request) {
 	var org string
 	e = tx.QueryRow("UPDATE devices SET revoked=true WHERE id=$1 RETURNING organization_id", id).Scan(&org)
 	if e == nil {
-		_, e = tx.Exec("UPDATE sessions SET closed_at=now() WHERE device_id=$1 AND closed_at IS NULL", id)
+		var sessionIDs []string
+		sessionIDs, e = closeSessions(tx, "device_id", id)
+		if e == nil {
+			if e = audit(tx, org, actor(r).ID, "device.revoke", id); e == nil {
+				e = tx.Commit()
+				if e == nil {
+					for _, sessionID := range sessionIDs {
+						s.sshKeys.Delete(sessionID)
+					}
+				}
+			}
+		}
 	}
-	if e == nil {
-		e = audit(tx, org, actor(r).ID, "device.revoke", id)
-	}
-	if e != nil || tx.Commit() != nil {
+	if e != nil {
 		fail(w, 503, "revocation failed closed; retry required")
 		return
 	}

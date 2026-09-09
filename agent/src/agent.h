@@ -64,6 +64,7 @@ extern struct mosquitto *g_mosq;
 // Configuration & Hardware
 int load_config(void);
 int save_config_option(const char *section, const char *option, const char *value);
+int save_provisioned_config(const char *device_id, const char *mqtt_host, const char *mqtt_port, const char *organization);
 void detect_board_hardware(void);
 
 // PKI Lifecycle & Provisioning

@@ -146,7 +146,9 @@ func (s *Core) Maintain(ctx context.Context) {
 				}
 			}
 			s.DB.Exec("DELETE FROM recovery_challenges WHERE expires_at<now()")
-			s.DB.Exec("UPDATE sessions SET closed_at=now() WHERE closed_at IS NULL AND expires_at<=now()")
+			if e := s.expireSessions(); e != nil {
+				log.Printf("session expiry: %v", e)
+			}
 			if now.Sub(last) >= time.Hour {
 				if e := Partitions(s.DB, now); e != nil {
 					log.Printf("partitions: %v", e)

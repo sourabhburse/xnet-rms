@@ -99,7 +99,7 @@ int load_config(void){
   char locked[128]={0};FILE *f=fopen(SERVER_LOCK,"r");if(f){fgets(locked,sizeof(locked),f);fclose(f);if(strcmp(locked,g_cfg.server_url)){strcpy(error_code,"reprovisioning_required");return -1;}}
   else if(rms_write_atomic(SERVER_LOCK,g_cfg.server_url,strlen(g_cfg.server_url),0600)){strcpy(error_code,"installation_lock_failed");return -1;}
  }
- g_cfg.provisioned=rms_id(g_cfg.device_id)&&access(RMS_CLIENT_CRT,F_OK)==0&&rms_cert_due()!=2;
+ g_cfg.provisioned=config_ok&&rms_id(g_cfg.device_id)&&g_cfg.mqtt_host[0]&&g_cfg.mqtt_port>0&&access(RMS_CLIENT_CRT,F_OK)==0&&rms_cert_due()!=2;
  if(!config_ok){strcpy(error_code,"invalid_configuration");return -1;}return 0;
 }
 int save_config_option(const char *section, const char *option, const char *value) {
@@ -117,6 +117,33 @@ int save_config_option(const char *section, const char *option, const char *valu
     if(rc==UCI_OK)rc=uci_commit(ctx,&ptr.p,false);
     uci_free_context(ctx);
     return rc==UCI_OK?0:-1;
+}
+
+int save_provisioned_config(const char *device_id, const char *mqtt_host, const char *mqtt_port, const char *organization) {
+    if (!device_id || !mqtt_host || !mqtt_port || !organization) return -1;
+    struct uci_context *ctx = uci_alloc_context();
+    struct uci_package *pkg = NULL;
+    if (!ctx || uci_load(ctx, "niseva", &pkg) != UCI_OK) {
+        if (ctx) uci_free_context(ctx);
+        return -1;
+    }
+    const char *options[] = {"device_id", "mqtt_host", "mqtt_port", "organization_name", "enrollment_token"};
+    const char *values[] = {device_id, mqtt_host, mqtt_port, organization, ""};
+    int rc = UCI_OK;
+    for (size_t i = 0; i < sizeof(options) / sizeof(options[0]); i++) {
+        struct uci_ptr ptr = {
+            .package = "niseva",
+            .section = "general",
+            .option = options[i],
+            .value = values[i],
+        };
+        rc = uci_set(ctx, &ptr);
+        if (rc != UCI_OK) break;
+    }
+    if (rc == UCI_OK) rc = uci_commit(ctx, &pkg, false);
+    uci_unload(ctx, pkg);
+    uci_free_context(ctx);
+    return rc == UCI_OK ? 0 : -1;
 }
 
 int main(int argc,char **argv){
