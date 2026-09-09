@@ -1,712 +1,86 @@
-import React, { useEffect, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Card,
-  Empty,
-  Form,
-  Input,
-  InputNumber,
-  Modal,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
-import {
-  PlusOutlined,
-  ReloadOutlined,
-  StopOutlined,
-  CopyOutlined,
-} from '@ant-design/icons';
-import {
-  AuditRecord,
-  CollectorBundle,
-  DeviceGroup,
-  EnrollmentToken,
-  Organization,
-  Profile,
-  User,
-} from '../types';
-import { api, formatApiError } from '../api';
+import React, { useEffect, useState } from "react";
+import { Building2, Check, Copy, KeyRound, LineChart, Plus, RefreshCw, ScrollText, ShieldAlert, StopCircle, TerminalSquare, Users } from "lucide-react";
+import { toast } from "sonner";
 
-interface AdminViewsProps {
-  view: string;
-  currentUser: User;
-  data: any[];
-  organizations: Organization[];
-  groups: DeviceGroup[];
-  selectedOrg: string;
-  loading: boolean;
-  onRefresh: () => void;
+import { AuditRecord, CollectorBundle, DeviceGroup, EnrollmentToken, Organization, Profile, User } from "../types";
+import { api, formatApiError } from "../api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+interface AdminViewsProps { view: string; currentUser: User; data: any[]; organizations: Organization[]; groups: DeviceGroup[]; selectedOrg: string; loading: boolean; onRefresh: () => void; }
+const selectClass = "h-9 w-full rounded-md border border-input bg-card px-3 text-[12px] text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/25";
+
+function AdminHeader({ title, description, icon: Icon, loading, onRefresh, actionLabel, onAction }: { title: string; description: string; icon: React.ComponentType<{ className?: string }>; loading: boolean; onRefresh: () => void; actionLabel?: string; onAction?: () => void }) {
+  return <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-start gap-3"><span className="grid size-9 place-items-center rounded-lg border border-accent bg-accent text-accent-foreground"><Icon className="size-4" /></span><div><h1 className="font-display text-[20px] font-semibold">{title}</h1><p className="mt-1 text-[13px] text-muted-foreground">{description}</p></div></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}><RefreshCw className={loading ? "size-3.5 animate-spin" : "size-3.5"} />Refresh</Button>{actionLabel && onAction && <Button size="sm" onClick={onAction}><Plus className="size-4" />{actionLabel}</Button>}</div></div>;
 }
 
-export default function AdminViews({
-  view,
-  currentUser,
-  data,
-  organizations,
-  groups,
-  selectedOrg,
-  loading,
-  onRefresh,
-}: AdminViewsProps) {
-  const isSuperAdmin = currentUser.role === 'SUPER_ADMIN';
+function EmptyTable({ colSpan, loading, text }: { colSpan: number; loading: boolean; text: string }) {
+  return <TableRow><TableCell colSpan={colSpan} className="h-28 text-center text-xs text-muted-foreground">{loading ? "Loading…" : text}</TableCell></TableRow>;
+}
+
+export default function AdminViews({ view, currentUser, data, organizations, groups, selectedOrg, loading, onRefresh }: AdminViewsProps) {
+  const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  // Form states
-  const [targetOrg, setTargetOrg] = useState(selectedOrg || currentUser.organization_id || '');
-  const [userForm, setUserForm] = useState({ email: '', password: '', role: 'OPERATOR' });
-  const [tokenForm, setTokenForm] = useState({ name: '', max_uses: 1, group_ids: [] as string[] });
-  const [customerForm, setCustomerForm] = useState({ name: '' });
-  const [rawJsonForm, setRawJsonForm] = useState('');
+  const [targetOrg, setTargetOrg] = useState(selectedOrg || currentUser.organization_id || "");
+  const [userForm, setUserForm] = useState({ email: "", password: "", role: "OPERATOR" });
+  const [tokenForm, setTokenForm] = useState({ name: "", max_uses: 1, group_ids: [] as string[] });
+  const [customerForm, setCustomerForm] = useState({ name: "" });
+  const [rawJsonForm, setRawJsonForm] = useState("");
   const [createdTokenNotice, setCreatedTokenNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (selectedOrg) setTargetOrg(selectedOrg);
-  }, [selectedOrg]);
+  const [disableTarget, setDisableTarget] = useState<User | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<EnrollmentToken | null>(null);
+  useEffect(() => { if (selectedOrg) setTargetOrg(selectedOrg); }, [selectedOrg]);
 
   const openCreateModal = () => {
-    setModalOpen(true);
-    setCreatedTokenNotice(null);
-    if (view === 'profiles') {
-      setRawJsonForm(
-        JSON.stringify(
-          {
-            version: 1,
-            name: 'System Telemetry',
-            source_id: 'system',
-            type: 'ubus',
-            object: 'system',
-            method: 'info',
-            interval_seconds: 60,
-            timeout_seconds: 5,
-            max_output_bytes: 32768,
-            fields: [{ id: 'uptime', path: '/uptime', label: 'Uptime', unit: 's', kind: 'counter' }],
-          },
-          null,
-          2
-        )
-      );
-    } else if (view === 'bundles') {
-      setRawJsonForm(
-        JSON.stringify(
-          {
-            version: 1,
-            script: "#!/bin/sh\nprintf '{\"status\":\"supported\"}\\n'\nexit 0\n",
-          },
-          null,
-          2
-        )
-      );
-    }
+    setModalOpen(true); setCreatedTokenNotice(null);
+    if (view === "profiles") setRawJsonForm(JSON.stringify({ version: 1, name: "System Telemetry", source_id: "system", type: "ubus", object: "system", method: "info", interval_seconds: 60, timeout_seconds: 5, max_output_bytes: 32768, fields: [{ id: "uptime", path: "/uptime", label: "Uptime", unit: "s", kind: "counter" }] }, null, 2));
+    if (view === "bundles") setRawJsonForm(JSON.stringify({ version: 1, script: "#!/bin/sh\nprintf '{\"status\":\"supported\"}\\n'\nexit 0\n" }, null, 2));
   };
-
+  const closeModal = () => { setModalOpen(false); setCreatedTokenNotice(null); };
   const handleCreate = async () => {
     setSubmitting(true);
     try {
-      if (view === 'users') {
-        if (!userForm.email || !userForm.password) {
-          message.warning('Email and password required (password 12–72 chars).');
-          setSubmitting(false);
-          return;
-        }
-        await api('users', 'POST', {
-          ...userForm,
-          organization_id: targetOrg,
-        });
-        message.success('User created successfully');
-      } else if (view === 'enrollment-tokens') {
-        if (!tokenForm.name) {
-          message.warning('Token name is required.');
-          setSubmitting(false);
-          return;
-        }
-        const res = await api<{ id: string; token: string }>('enrollment-tokens', 'POST', {
-          ...tokenForm,
-          organization_id: targetOrg,
-          expires_at: null,
-        });
-        setCreatedTokenNotice(res.token);
-        message.success('Enrollment token generated');
-        onRefresh();
-        setSubmitting(false);
-        return;
-      } else if (view === 'organizations') {
-        if (!customerForm.name) {
-          message.warning('Customer name is required.');
-          setSubmitting(false);
-          return;
-        }
-        await api('organizations', 'POST', customerForm);
-        message.success('Customer organization created');
-      } else if (view === 'profiles' || view === 'bundles') {
-        const payload = JSON.parse(rawJsonForm);
-        await api(view, 'POST', payload);
-        message.success(`${view} created successfully`);
+      if (view === "users") {
+        if (!userForm.email || !userForm.password) { toast.warning("Email and password required (password 12–72 chars)."); return; }
+        await api("users", "POST", { ...userForm, organization_id: targetOrg }); toast.success("User created successfully");
+      } else if (view === "enrollment-tokens") {
+        if (!tokenForm.name) { toast.warning("Token name is required."); return; }
+        const result = await api<{ id: string; token: string }>("enrollment-tokens", "POST", { ...tokenForm, organization_id: targetOrg, expires_at: null });
+        setCreatedTokenNotice(result.token); toast.success("Enrollment token generated"); onRefresh(); return;
+      } else if (view === "organizations") {
+        if (!customerForm.name) { toast.warning("Customer name is required."); return; }
+        await api("organizations", "POST", customerForm); toast.success("Customer organization created");
+      } else if (view === "profiles" || view === "bundles") {
+        await api(view, "POST", JSON.parse(rawJsonForm)); toast.success(`${view} created successfully`);
       }
-
-      setModalOpen(false);
-      onRefresh();
-    } catch (err) {
-      const formatted = formatApiError(err);
-      message.error(formatted.message);
-    } finally {
-      setSubmitting(false);
-    }
+      closeModal(); onRefresh();
+    } catch (err) { toast.error(formatApiError(err).message); } finally { setSubmitting(false); }
   };
+  const disableUser = async () => { if (!disableTarget) return; try { await api(`users/${disableTarget.id}/disable`, "POST", {}); toast.success("User disabled"); setDisableTarget(null); onRefresh(); } catch (err) { toast.error(formatApiError(err).message); } };
+  const revokeToken = async () => { if (!revokeTarget) return; try { await api(`enrollment-tokens/${revokeTarget.id}`, "DELETE"); toast.success("Token revoked"); setRevokeTarget(null); onRefresh(); } catch (err) { toast.error(formatApiError(err).message); } };
+  const scopeSelect = isSuperAdmin && <select aria-label="Customer organization" value={targetOrg} onChange={(event) => setTargetOrg(event.target.value)} className={selectClass}><option value="">Select organization</option>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select>;
 
-  const handleDisableUser = (userId: string) => {
-    Modal.confirm({
-      title: 'Disable user account?',
-      content: 'This user will be logged out and unable to access the RMS platform.',
-      okText: 'Disable Account',
-      okType: 'danger',
-      onOk: async () => {
-        try {
-          await api(`users/${userId}/disable`, 'POST', {});
-          message.success('User disabled');
-          onRefresh();
-        } catch (err) {
-          const formatted = formatApiError(err);
-          message.error(formatted.message);
-        }
-      },
-    });
-  };
+  if (view === "users") return <div className="mx-auto flex max-w-[1200px] flex-col gap-4"><AdminHeader title="User accounts" description="Manage platform users, roles, and access permissions." icon={Users} loading={loading} onRefresh={onRefresh} actionLabel="Add user" onAction={openCreateModal} /><Card><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Email address</TableHead><TableHead>Role</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader><TableBody>{data.length ? (data as User[]).map((item) => <TableRow key={item.id}><TableCell className="font-medium">{item.email}</TableCell><TableCell><Badge variant={item.role === "SUPER_ADMIN" || item.role === "ORG_ADMIN" ? "accent" : "secondary"} className="font-normal">{item.role.replace("_", " ")}</Badge></TableCell><TableCell><Badge variant={item.disabled ? "down" : "ok"}>{item.disabled ? "Disabled" : "Active"}</Badge></TableCell><TableCell className="text-right"><Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={item.disabled || item.id === currentUser.id} onClick={() => setDisableTarget(item)}><StopCircle className="size-3.5" />Disable</Button></TableCell></TableRow>) : <EmptyTable colSpan={4} loading={loading} text="No users in this scope." />}</TableBody></Table></CardContent></Card><Dialog open={modalOpen} onOpenChange={setModalOpen}><DialogContent><DialogHeader><DialogTitle>Create user account</DialogTitle><DialogDescription>Grant an account the minimum role needed for their work.</DialogDescription></DialogHeader><div className="space-y-4">{scopeSelect}<div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Email address</label><Input type="email" value={userForm.email} placeholder="user@organization.com" onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} /></div><div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Initial password</label><Input type="password" value={userForm.password} placeholder="Minimum 12 characters" onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} /></div><div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Role</label><select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value })} className={selectClass}><option value="ORG_ADMIN">Organization administrator</option><option value="OPERATOR">Operator</option><option value="VIEWER">Viewer</option></select></div></div><DialogFooter><Button variant="outline" onClick={closeModal} disabled={submitting}>Cancel</Button><Button onClick={handleCreate} disabled={submitting}>{submitting ? "Creating…" : "Create user"}</Button></DialogFooter></DialogContent></Dialog><ConfirmDialog open={!!disableTarget} onOpenChange={(open) => !open && setDisableTarget(null)} title="Disable user account?" description="This user will be logged out and unable to access the RMS platform." confirmLabel="Disable account" onConfirm={disableUser} /></div>;
 
-  const handleRevokeToken = (tokenId: string) => {
-    Modal.confirm({
-      title: 'Revoke enrollment token?',
-      content: 'Any pending routers using this token will no longer be allowed to auto-enroll.',
-      okText: 'Revoke Token',
-      okType: 'danger',
-      onOk: async () => {
-        try {
-          await api(`enrollment-tokens/${tokenId}`, 'DELETE');
-          message.success('Token revoked');
-          onRefresh();
-        } catch (err) {
-          const formatted = formatApiError(err);
-          message.error(formatted.message);
-        }
-      },
-    });
-  };
+  if (view === "enrollment-tokens") return <div className="mx-auto flex max-w-[1200px] flex-col gap-4"><AdminHeader title="Enrollment tokens" description="Pre-shared tokens used by router daemons to auto-enroll into a customer workspace." icon={KeyRound} loading={loading} onRefresh={onRefresh} actionLabel="Generate token" onAction={openCreateModal} /><Card><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Token name / purpose</TableHead><TableHead>Uses</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader><TableBody>{data.length ? (data as EnrollmentToken[]).map((item) => <TableRow key={item.id}><TableCell className="font-medium">{item.name}</TableCell><TableCell className="font-mono text-[11px] tabular-nums">{item.used_count} / {item.max_uses ?? "∞"}</TableCell><TableCell><Badge variant={item.revoked ? "down" : "ok"}>{item.revoked ? "Revoked" : "Active"}</Badge></TableCell><TableCell className="text-right"><Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={item.revoked} onClick={() => setRevokeTarget(item)}><ShieldAlert className="size-3.5" />Revoke token</Button></TableCell></TableRow>) : <EmptyTable colSpan={4} loading={loading} text="No enrollment tokens in this scope." />}</TableBody></Table></CardContent></Card><Dialog open={modalOpen} onOpenChange={closeModal}><DialogContent>{createdTokenNotice ? <><DialogHeader><DialogTitle>Copy enrollment token</DialogTitle><DialogDescription>For security, this token cannot be displayed again after closing this dialog.</DialogDescription></DialogHeader><div className="rounded-lg border border-warn-border bg-warn-bg p-3"><div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-warn"><KeyRound className="size-4" />Copy this token now</div><code className="block break-all font-mono text-[11px] text-warn">{createdTokenNotice}</code></div><DialogFooter><Button variant="outline" onClick={() => { void navigator.clipboard?.writeText(createdTokenNotice); toast.success("Token copied"); }}><Copy className="size-4" />Copy token</Button><Button onClick={closeModal}>Done</Button></DialogFooter></> : <><DialogHeader><DialogTitle>Generate enrollment token</DialogTitle><DialogDescription>Set a purpose and optional default device groups for first claim.</DialogDescription></DialogHeader><div className="space-y-4">{scopeSelect}<div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Token name</label><Input value={tokenForm.name} placeholder="e.g. Warehouse batch 2026" onChange={(event) => setTokenForm({ ...tokenForm, name: event.target.value })} /></div><div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Maximum allowed uses</label><Input type="number" min={1} max={10000} value={tokenForm.max_uses} onChange={(event) => setTokenForm({ ...tokenForm, max_uses: Number(event.target.value) || 1 })} /></div><div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Default device groups</label><div className="max-h-32 overflow-y-auto rounded-md border border-input">{groups.filter((group) => !targetOrg || group.organization_id === targetOrg).map((group) => <label key={group.id} className="flex items-center gap-2 border-b border-border px-3 py-2 text-[12px] last:border-0"><input type="checkbox" checked={tokenForm.group_ids.includes(group.id)} onChange={(event) => setTokenForm({ ...tokenForm, group_ids: event.target.checked ? [...tokenForm.group_ids, group.id] : tokenForm.group_ids.filter((id) => id !== group.id) })} className="size-4 accent-primary" />{group.name}</label>)}{groups.filter((group) => !targetOrg || group.organization_id === targetOrg).length === 0 && <p className="p-3 text-xs text-muted-foreground">No groups in this scope.</p>}</div></div></div><DialogFooter><Button variant="outline" onClick={closeModal} disabled={submitting}>Cancel</Button><Button onClick={handleCreate} disabled={submitting}>{submitting ? "Generating…" : "Generate token"}</Button></DialogFooter></>}</DialogContent></Dialog><ConfirmDialog open={!!revokeTarget} onOpenChange={(open) => !open && setRevokeTarget(null)} title="Revoke enrollment token?" description="Pending routers using this token will no longer be allowed to auto-enroll." confirmLabel="Revoke token" onConfirm={revokeToken} /></div>;
 
-  // Render view-specific content
-  if (view === 'users') {
-    return (
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <div className="page-header">
-          <div>
-            <Typography.Title level={3} className="page-title">
-              User Accounts
-            </Typography.Title>
-            <div className="page-subtitle">
-              Manage platform users, roles, and access permissions.
-            </div>
-          </div>
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
-              Refresh
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={openCreateModal}
-              style={{ background: '#0284c7', borderColor: '#0284c7' }}
-            >
-              Add User
-            </Button>
-          </Space>
-        </div>
+  if (view === "organizations") return <div className="mx-auto flex max-w-[1000px] flex-col gap-4"><AdminHeader title="Customer organizations" description="Multi-tenant customer isolation boundaries." icon={Building2} loading={loading} onRefresh={onRefresh} actionLabel="Create customer" onAction={openCreateModal} /><Card><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Customer name</TableHead><TableHead>Organization ID</TableHead></TableRow></TableHeader><TableBody>{data.length ? (data as Organization[]).map((item) => <TableRow key={item.id}><TableCell className="font-medium">{item.name}</TableCell><TableCell className="font-mono text-[10.5px] text-muted-foreground">{item.id}</TableCell></TableRow>) : <EmptyTable colSpan={2} loading={loading} text="No customer organizations." />}</TableBody></Table></CardContent></Card><Dialog open={modalOpen} onOpenChange={setModalOpen}><DialogContent><DialogHeader><DialogTitle>Create customer organization</DialogTitle><DialogDescription>New devices, users, and tags will be scoped to this customer.</DialogDescription></DialogHeader><div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Customer name</label><Input value={customerForm.name} maxLength={128} placeholder="e.g. Acme Corp network" onChange={(event) => setCustomerForm({ name: event.target.value })} /></div><DialogFooter><Button variant="outline" onClick={closeModal} disabled={submitting}>Cancel</Button><Button onClick={handleCreate} disabled={submitting}>{submitting ? "Creating…" : "Create customer"}</Button></DialogFooter></DialogContent></Dialog></div>;
 
-        <Card className="rms-card" bordered={false}>
-          <Table<User>
-            rowKey="id"
-            className="rms-table"
-            loading={loading}
-            dataSource={data}
-            columns={[
-              { title: 'Email Address', dataIndex: 'email', key: 'email', render: e => <span style={{ fontWeight: 600 }}>{e}</span> },
-              {
-                title: 'Role',
-                dataIndex: 'role',
-                key: 'role',
-                render: r => {
-                  let c = 'default';
-                  if (r === 'SUPER_ADMIN') c = 'magenta';
-                  if (r === 'ORG_ADMIN') c = 'blue';
-                  if (r === 'OPERATOR') c = 'cyan';
-                  return <Tag color={c}>{r}</Tag>;
-                },
-              },
-              {
-                title: 'Status',
-                dataIndex: 'disabled',
-                key: 'disabled',
-                render: disabled =>
-                  disabled ? (
-                    <Tag color="error">Disabled</Tag>
-                  ) : (
-                    <Tag color="success">Active</Tag>
-                  ),
-              },
-              {
-                title: 'Action',
-                key: 'action',
-                render: (_, r: User) => (
-                  <Button
-                    size="small"
-                    danger
-                    icon={<StopOutlined />}
-                    disabled={r.disabled || r.id === currentUser.id}
-                    onClick={() => handleDisableUser(r.id)}
-                  >
-                    Disable
-                  </Button>
-                ),
-              },
-            ]}
-          />
-        </Card>
+  if (view === "profiles") return <div className="mx-auto flex max-w-[1200px] flex-col gap-4"><AdminHeader title="Monitoring templates" description="Declarative telemetry definitions collected by router agents via OpenWrt ubus." icon={LineChart} loading={loading} onRefresh={onRefresh} actionLabel={isSuperAdmin ? "Create template" : undefined} onAction={isSuperAdmin ? openCreateModal : undefined} /><Card><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Template name</TableHead><TableHead>Source ID</TableHead><TableHead>Version</TableHead><TableHead>Poll interval</TableHead><TableHead>Target object / method</TableHead></TableRow></TableHeader><TableBody>{data.length ? (data as Profile[]).map((item) => <TableRow key={`${item.id}-${item.version}`}><TableCell className="font-medium">{item.definition?.name || item.id}</TableCell><TableCell className="font-mono text-[11px]">{item.definition?.source_id}</TableCell><TableCell><Badge variant="accent">v{item.version}</Badge></TableCell><TableCell className="font-mono text-[11px]">{item.definition?.interval_seconds ?? 60}s</TableCell><TableCell className="font-mono text-[11px] text-muted-foreground">{item.definition?.object || "system"} → {item.definition?.method || "info"}</TableCell></TableRow>) : <EmptyTable colSpan={5} loading={loading} text="No monitoring templates." />}</TableBody></Table></CardContent></Card><JsonDialog open={modalOpen} onOpenChange={setModalOpen} title="Create monitoring template" description="Submit a versioned telemetry definition as JSON." value={rawJsonForm} onChange={setRawJsonForm} submitting={submitting} onSubmit={handleCreate} submitLabel="Create template" /></div>;
 
-        <Modal
-          title="Create User Account"
-          open={modalOpen}
-          onCancel={() => setModalOpen(false)}
-          onOk={handleCreate}
-          confirmLoading={submitting}
-          okText="Create User"
-        >
-          <Form layout="vertical">
-            {isSuperAdmin && (
-              <Form.Item label="Customer Organization" required>
-                <Select
-                  placeholder="Select Customer Organization"
-                  value={targetOrg || undefined}
-                  onChange={setTargetOrg}
-                  options={organizations.map(o => ({ value: o.id, label: o.name }))}
-                />
-              </Form.Item>
-            )}
-            <Form.Item label="Email Address" required>
-              <Input
-                type="email"
-                placeholder="user@organization.com"
-                value={userForm.email}
-                onChange={e => setUserForm({ ...userForm, email: e.target.value })}
-              />
-            </Form.Item>
-            <Form.Item label="Initial Password (min 12 characters)" required>
-              <Input.Password
-                placeholder="Secure initial password"
-                value={userForm.password}
-                onChange={e => setUserForm({ ...userForm, password: e.target.value })}
-              />
-            </Form.Item>
-            <Form.Item label="Role" required>
-              <Select
-                value={userForm.role}
-                onChange={v => setUserForm({ ...userForm, role: v })}
-                options={[
-                  { value: 'ORG_ADMIN', label: 'Organization Administrator (Full Org Access)' },
-                  { value: 'OPERATOR', label: 'Operator (Device & Session Operations)' },
-                  { value: 'VIEWER', label: 'Viewer (Read-only)' },
-                ]}
-              />
-            </Form.Item>
-          </Form>
-        </Modal>
-      </div>
-    );
-  }
+  if (view === "audit-logs") return <div className="mx-auto flex max-w-[1200px] flex-col gap-4"><AdminHeader title="Security audit records" description="Immutable audit trail of administrator and system actions." icon={ScrollText} loading={loading} onRefresh={onRefresh} /><Card><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Timestamp</TableHead><TableHead>Action</TableHead><TableHead>Target ID</TableHead><TableHead>Actor ID</TableHead></TableRow></TableHeader><TableBody>{data.length ? (data as AuditRecord[]).map((item) => <TableRow key={item.id}><TableCell className="whitespace-nowrap font-mono text-[10.5px]">{new Date(item.created_at).toLocaleString()}</TableCell><TableCell><Badge variant="accent" className="font-normal">{item.action}</Badge></TableCell><TableCell className="font-mono text-[10.5px]">{item.resource_id}</TableCell><TableCell className="font-mono text-[10.5px]">{item.user_id || "system"}</TableCell></TableRow>) : <EmptyTable colSpan={4} loading={loading} text="No audit records." />}</TableBody></Table></CardContent></Card></div>;
 
-  if (view === 'enrollment-tokens') {
-    return (
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <div className="page-header">
-          <div>
-            <Typography.Title level={3} className="page-title">
-              Enrollment Tokens
-            </Typography.Title>
-            <div className="page-subtitle">
-              Pre-shared cryptographic tokens used by OpenWrt router daemons to auto-enroll into your customer fleet.
-            </div>
-          </div>
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
-              Refresh
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={openCreateModal}
-              style={{ background: '#0284c7', borderColor: '#0284c7' }}
-            >
-              Generate Token
-            </Button>
-          </Space>
-        </div>
+  if (view === "bundles") return <div className="mx-auto flex max-w-[1200px] flex-col gap-4"><AdminHeader title="Collector bundles" description="Signed shell collector packages deployed to connected routers." icon={TerminalSquare} loading={loading} onRefresh={onRefresh} actionLabel={isSuperAdmin ? "Publish bundle" : undefined} onAction={isSuperAdmin ? openCreateModal : undefined} /><Card><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Bundle ID</TableHead><TableHead>Version</TableHead><TableHead>Created</TableHead></TableRow></TableHeader><TableBody>{data.length ? (data as CollectorBundle[]).map((item) => <TableRow key={`${item.id}-${item.version}`}><TableCell className="font-mono text-[11px]">{item.id}</TableCell><TableCell><Badge variant="accent">v{item.version}</Badge></TableCell><TableCell className="font-mono text-[10.5px] text-muted-foreground">{item.created_at ? new Date(item.created_at).toLocaleString() : "—"}</TableCell></TableRow>) : <EmptyTable colSpan={3} loading={loading} text="No collector bundles." />}</TableBody></Table></CardContent></Card><JsonDialog open={modalOpen} onOpenChange={setModalOpen} title="Publish collector bundle" description="Submit the signed bundle definition as JSON." value={rawJsonForm} onChange={setRawJsonForm} submitting={submitting} onSubmit={handleCreate} submitLabel="Publish bundle" /></div>;
 
-        <Card className="rms-card" bordered={false}>
-          <Table<EnrollmentToken>
-            rowKey="id"
-            className="rms-table"
-            loading={loading}
-            dataSource={data}
-            columns={[
-              { title: 'Token Name / Purpose', dataIndex: 'name', key: 'name', render: n => <span style={{ fontWeight: 600 }}>{n}</span> },
-              { title: 'Uses Count', key: 'uses', render: (_, r) => `${r.used_count} / ${r.max_uses ?? '∞'}` },
-              {
-                title: 'Status',
-                dataIndex: 'revoked',
-                key: 'revoked',
-                render: revoked =>
-                  revoked ? <Tag color="error">Revoked</Tag> : <Tag color="success">Active</Tag>,
-              },
-              {
-                title: 'Action',
-                key: 'action',
-                render: (_, r: EnrollmentToken) => (
-                  <Button
-                    size="small"
-                    danger
-                    disabled={r.revoked}
-                    onClick={() => handleRevokeToken(r.id)}
-                  >
-                    Revoke Token
-                  </Button>
-                ),
-              },
-            ]}
-          />
-        </Card>
+  return <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Select a view from the administration navigation.</div>;
+}
 
-        <Modal
-          title={createdTokenNotice ? 'Copy Enrollment Token' : 'Generate Enrollment Token'}
-          open={modalOpen}
-          onCancel={() => {
-            setModalOpen(false);
-            setCreatedTokenNotice(null);
-          }}
-          footer={
-            createdTokenNotice
-              ? [
-                  <Button
-                    key="close"
-                    type="primary"
-                    onClick={() => {
-                      setModalOpen(false);
-                      setCreatedTokenNotice(null);
-                    }}
-                  >
-                    Done
-                  </Button>,
-                ]
-              : undefined
-          }
-          onOk={handleCreate}
-          confirmLoading={submitting}
-          okText="Generate Token"
-        >
-          {createdTokenNotice ? (
-            <div>
-              <Alert
-                type="warning"
-                showIcon
-                message="Copy this token now"
-                description="For security reasons, this token cannot be displayed again."
-                style={{ marginBottom: 16 }}
-              />
-              <Typography.Paragraph
-                copyable={{ text: createdTokenNotice }}
-                code
-                style={{ wordBreak: 'break-all', fontSize: 13 }}
-              >
-                {createdTokenNotice}
-              </Typography.Paragraph>
-            </div>
-          ) : (
-            <Form layout="vertical">
-              {isSuperAdmin && (
-                <Form.Item label="Customer Organization" required>
-                  <Select
-                    placeholder="Select Customer Organization"
-                    value={targetOrg || undefined}
-                    onChange={setTargetOrg}
-                    options={organizations.map(o => ({ value: o.id, label: o.name }))}
-                  />
-                </Form.Item>
-              )}
-              <Form.Item label="Token Name / Label" required>
-                <Input
-                  placeholder="e.g. Batch-2S-2026-Warehouse"
-                  value={tokenForm.name}
-                  onChange={e => setTokenForm({ ...tokenForm, name: e.target.value })}
-                />
-              </Form.Item>
-              <Form.Item label="Maximum Allowed Uses">
-                <InputNumber
-                  min={1}
-                  max={10000}
-                  value={tokenForm.max_uses}
-                  onChange={v => setTokenForm({ ...tokenForm, max_uses: v || 1 })}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-              <Form.Item label="Default device groups">
-                <Select
-                  mode="multiple"
-                  allowClear
-                  placeholder="Optional groups applied on first claim"
-                  value={tokenForm.group_ids}
-                  onChange={v => setTokenForm({ ...tokenForm, group_ids: v })}
-                  options={groups
-                    .filter(g => !targetOrg || g.organization_id === targetOrg)
-                    .map(g => ({ value: g.id, label: g.name }))}
-                />
-              </Form.Item>
-            </Form>
-          )}
-        </Modal>
-      </div>
-    );
-  }
-
-  if (view === 'organizations') {
-    return (
-      <div style={{ maxWidth: 1000, margin: '0 auto' }}>
-        <div className="page-header">
-          <div>
-            <Typography.Title level={3} className="page-title">
-              Customer Organizations
-            </Typography.Title>
-            <div className="page-subtitle">
-              Multi-tenant customer isolation boundaries.
-            </div>
-          </div>
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
-              Refresh
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={openCreateModal}
-              style={{ background: '#0284c7', borderColor: '#0284c7' }}
-            >
-              Create Customer
-            </Button>
-          </Space>
-        </div>
-
-        <Card className="rms-card" bordered={false}>
-          <Table<Organization>
-            rowKey="id"
-            className="rms-table"
-            loading={loading}
-            dataSource={data}
-            columns={[
-              { title: 'Customer Name', dataIndex: 'name', key: 'name', render: n => <span style={{ fontWeight: 600 }}>{n}</span> },
-              { title: 'Organization ID', dataIndex: 'id', key: 'id', render: id => <span className="code-font" style={{ fontSize: 12, color: '#64748b' }}>{id}</span> },
-            ]}
-          />
-        </Card>
-
-        <Modal
-          title="Create Customer Organization"
-          open={modalOpen}
-          onCancel={() => setModalOpen(false)}
-          onOk={handleCreate}
-          confirmLoading={submitting}
-          okText="Create Customer"
-        >
-          <Form layout="vertical">
-            <Form.Item label="Customer / Organization Name" required>
-              <Input
-                placeholder="e.g. Acme Corp Fleet"
-                value={customerForm.name}
-                maxLength={128}
-                onChange={e => setCustomerForm({ name: e.target.value })}
-              />
-            </Form.Item>
-          </Form>
-        </Modal>
-      </div>
-    );
-  }
-
-  if (view === 'profiles') {
-    return (
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <div className="page-header">
-          <div>
-            <Typography.Title level={3} className="page-title">
-              Monitoring Profiles
-            </Typography.Title>
-            <div className="page-subtitle">
-              Declarative telemetry definitions collected by router agents via OpenWrt ubus.
-            </div>
-          </div>
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
-              Refresh
-            </Button>
-            {isSuperAdmin && (
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={openCreateModal}
-                style={{ background: '#0284c7', borderColor: '#0284c7' }}
-              >
-                Create Profile Version
-              </Button>
-            )}
-          </Space>
-        </div>
-
-        <Card className="rms-card" bordered={false}>
-          <Table<Profile>
-            rowKey={r => `${r.id}-${r.version}`}
-            className="rms-table"
-            loading={loading}
-            dataSource={data}
-            columns={[
-              { title: 'Profile Name', render: (_, r) => <span style={{ fontWeight: 600 }}>{r.definition?.name || r.id}</span> },
-              { title: 'Source ID', render: (_, r) => <span className="code-font">{r.definition?.source_id}</span> },
-              { title: 'Version', dataIndex: 'version', key: 'version', render: v => <Tag color="blue">v{v}</Tag> },
-              { title: 'Poll Interval', render: (_, r) => `${r.definition?.interval_seconds ?? 60}s` },
-              { title: 'Target Object / Method', render: (_, r) => `${r.definition?.object || 'system'} -> ${r.definition?.method || 'info'}` },
-            ]}
-          />
-        </Card>
-
-        <Modal
-          title="Create Monitoring Profile Version (JSON)"
-          open={modalOpen}
-          width={650}
-          onCancel={() => setModalOpen(false)}
-          onOk={handleCreate}
-          confirmLoading={submitting}
-          okText="Create Profile"
-        >
-          <Input.TextArea
-            rows={16}
-            className="code-font"
-            value={rawJsonForm}
-            onChange={e => setRawJsonForm(e.target.value)}
-          />
-        </Modal>
-      </div>
-    );
-  }
-
-  if (view === 'audit-logs') {
-    return (
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <div className="page-header">
-          <div>
-            <Typography.Title level={3} className="page-title">
-              Security Audit Records
-            </Typography.Title>
-            <div className="page-subtitle">
-              Immutable audit trail of administrator and system actions.
-            </div>
-          </div>
-          <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
-            Refresh
-          </Button>
-        </div>
-
-        <Card className="rms-card" bordered={false}>
-          <Table<AuditRecord>
-            rowKey="id"
-            className="rms-table"
-            loading={loading}
-            dataSource={data}
-            columns={[
-              { title: 'Timestamp', dataIndex: 'created_at', render: t => new Date(t).toLocaleString() },
-              {
-                title: 'Action',
-                dataIndex: 'action',
-                render: a => <Tag color="geekblue">{a}</Tag>,
-              },
-              { title: 'Target ID', dataIndex: 'resource_id', render: id => <span className="code-font">{id}</span> },
-              { title: 'Actor ID', dataIndex: 'user_id', render: id => <span className="code-font">{id || 'system'}</span> },
-            ]}
-          />
-        </Card>
-      </div>
-    );
-  }
-
-  if (view === 'bundles') {
-    return (
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <div className="page-header">
-          <div>
-            <Typography.Title level={3} className="page-title">
-              Collector Bundles
-            </Typography.Title>
-            <div className="page-subtitle">
-              Cryptographically signed shell collector packages deployed to router fleets.
-            </div>
-          </div>
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
-              Refresh
-            </Button>
-            {isSuperAdmin && (
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={openCreateModal}
-                style={{ background: '#0284c7', borderColor: '#0284c7' }}
-              >
-                Publish Bundle
-              </Button>
-            )}
-          </Space>
-        </div>
-
-        <Card className="rms-card" bordered={false}>
-          <Table<CollectorBundle>
-            rowKey={r => `${r.id}-${r.version}`}
-            className="rms-table"
-            loading={loading}
-            dataSource={data}
-            columns={[
-              { title: 'Bundle ID', dataIndex: 'id', render: id => <span className="code-font">{id}</span> },
-              { title: 'Version', dataIndex: 'version', render: v => <Tag color="blue">v{v}</Tag> },
-              { title: 'Created', dataIndex: 'created_at', render: t => (t ? new Date(t).toLocaleString() : '—') },
-            ]}
-          />
-        </Card>
-
-        <Modal
-          title="Publish Collector Bundle (JSON)"
-          open={modalOpen}
-          width={650}
-          onCancel={() => setModalOpen(false)}
-          onOk={handleCreate}
-          confirmLoading={submitting}
-          okText="Publish Bundle"
-        >
-          <Input.TextArea
-            rows={14}
-            className="code-font"
-            value={rawJsonForm}
-            onChange={e => setRawJsonForm(e.target.value)}
-          />
-        </Modal>
-      </div>
-    );
-  }
-
-  return <div>Select a view from the sidebar navigation.</div>;
+function JsonDialog({ open, onOpenChange, title, description, value, onChange, submitting, onSubmit, submitLabel }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; value: string; onChange: (value: string) => void; submitting: boolean; onSubmit: () => void; submitLabel: string }) {
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-w-[680px]"><DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader><textarea rows={16} value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-md border border-input bg-card px-3 py-2 font-mono text-[11px] leading-5 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/25" /><DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button><Button onClick={onSubmit} disabled={submitting}>{submitting ? "Saving…" : submitLabel}</Button></DialogFooter></DialogContent></Dialog>;
 }
