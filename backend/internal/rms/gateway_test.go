@@ -79,6 +79,9 @@ func TestTunnelOriginAllowsAuthenticatedDashboardOrigin(t *testing.T) {
 	if tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "https://other.example:8445") {
 		t.Fatal("unrelated origin should remain rejected")
 	}
+	if !tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "null") {
+		t.Fatal("opaque LuCI origin should be accepted after session authentication")
+	}
 }
 
 func TestWsNetConnAdapter(t *testing.T) {

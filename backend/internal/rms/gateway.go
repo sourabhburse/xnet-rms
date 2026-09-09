@@ -137,7 +137,7 @@ func forwardLuciRequestHeaders(src http.Header) http.Header {
 }
 
 func tunnelOriginAllowed(publicURL, host, origin string) bool {
-	if origin == "" {
+	if origin == "" || origin == "null" {
 		return true
 	}
 	if sameOrigin("https://"+host, origin) {
