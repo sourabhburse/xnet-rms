@@ -42,7 +42,7 @@ export default function Navbar({
         <Input.Search
           aria-label="Search devices"
           className="global-search"
-          placeholder="Search devices..."
+          placeholder="Search devices, serials or MAC addresses"
           prefix={<SearchOutlined />}
           value={searchQuery}
           allowClear
@@ -50,7 +50,7 @@ export default function Navbar({
           onSearch={onSearchSubmit}
         />
         {isSuperAdmin && (
-          <Space>
+          <Space className="org-switcher" size={8}>
             <BankOutlined />
             <Select
               aria-label="Filter by organization"
@@ -58,7 +58,7 @@ export default function Navbar({
               allowClear
               value={selectedOrg || undefined}
               onChange={val => onSelectOrg(val || '')}
-              style={{ width: 240 }}
+              style={{ width: 230 }}
               options={[
                 { value: '', label: 'All Customers (Platform)' },
                 ...(organizations || []).map(org => ({
@@ -74,6 +74,7 @@ export default function Navbar({
       <div className="rms-nav-right">
         <Tooltip title="Refresh data">
           <Button
+            className="nav-refresh"
             icon={<ReloadOutlined spin={refreshing} />}
             onClick={onRefresh}
             disabled={refreshing}
@@ -82,9 +83,9 @@ export default function Navbar({
           </Button>
         </Tooltip>
 
-        <div className="user-badge">
+        <div className="user-badge" title={user.email}>
           <UserOutlined />
-          <span>{user.email}</span>
+          <span className="user-email">{user.email}</span>
           <Tag style={{ margin: 0 }}>
             {user.role}
           </Tag>

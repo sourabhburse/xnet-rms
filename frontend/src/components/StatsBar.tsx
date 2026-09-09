@@ -16,81 +16,81 @@ export default function StatsBar({
   onSelectFilter,
   onNavigate,
 }: StatsBarProps) {
+  const cards = [
+    {
+      key: 'online',
+      title: 'Online now',
+      value: stats.online ?? 0,
+      caption: 'Enrolled devices',
+      status: 'status-online',
+      label: 'Filter online devices',
+      onClick: () => {
+        onSelectFilter?.('ONLINE');
+        onNavigate?.('devices');
+      },
+    },
+    {
+      key: 'offline',
+      title: 'Offline',
+      value: stats.offline ?? 0,
+      caption: 'Needs attention',
+      status: 'status-offline',
+      label: 'Filter offline devices',
+      onClick: () => {
+        onSelectFilter?.('OFFLINE');
+        onNavigate?.('devices');
+      },
+    },
+    {
+      key: 'awaiting',
+      title: 'Awaiting device',
+      value: awaitingCount,
+      caption: 'Pre-registered',
+      status: 'status-awaiting',
+      label: 'Open awaiting devices',
+      onClick: () => onNavigate?.('registration-requests'),
+    },
+    {
+      key: 'pending',
+      title: 'Available to claim',
+      value: pendingCount,
+      caption: 'Ready for ownership',
+      status: 'status-pending',
+      label: 'Open available devices',
+      onClick: () => onNavigate?.('available-to-claim'),
+    },
+    {
+      key: 'revoked',
+      title: 'Revoked',
+      value: stats.revoked ?? 0,
+      caption: 'Access disabled',
+      status: 'status-revoked',
+      label: 'Filter revoked devices',
+      onClick: () => {
+        onSelectFilter?.('REVOKED');
+        onNavigate?.('devices');
+      },
+    },
+  ];
+
   return (
     <div className="stats-grid">
-      <div
-        className="stat-card"
-        onClick={() => {
-          onSelectFilter?.('ONLINE');
-          onNavigate?.('devices');
-        }}
-      >
-        <div className="stat-card-title">Enrolled Online</div>
-        <div className="stat-card-value">
-          {stats.online ?? 0}
-          <span className="status-pill status-online" style={{ fontSize: 11, padding: '1px 8px' }}>
-            <span className="status-dot" /> Online
+      {cards.map(card => (
+        <button
+          key={card.key}
+          type="button"
+          className="stat-card"
+          onClick={card.onClick}
+          aria-label={card.label}
+        >
+          <span className="stat-card-topline">
+            <span className="stat-card-title">{card.title}</span>
+            <span className={`stat-card-dot ${card.status}`} aria-hidden="true" />
           </span>
-        </div>
-      </div>
-
-      <div
-        className="stat-card"
-        onClick={() => {
-          onSelectFilter?.('OFFLINE');
-          onNavigate?.('devices');
-        }}
-      >
-        <div className="stat-card-title">Enrolled Offline</div>
-        <div className="stat-card-value">
-          {stats.offline ?? 0}
-          <span className="status-pill status-offline" style={{ fontSize: 11, padding: '1px 8px' }}>
-            <span className="status-dot" /> Offline
-          </span>
-        </div>
-      </div>
-
-      <div
-        className="stat-card"
-        onClick={() => onNavigate?.('registration-requests')}
-      >
-        <div className="stat-card-title">Awaiting Device</div>
-        <div className="stat-card-value">
-          {awaitingCount}
-          <span className="status-pill status-awaiting" style={{ fontSize: 11, padding: '1px 8px' }}>
-            <span className="status-dot" /> Pre-registered
-          </span>
-        </div>
-      </div>
-
-      <div
-        className="stat-card"
-        onClick={() => onNavigate?.('available-to-claim')}
-      >
-        <div className="stat-card-title">Available to Claim</div>
-        <div className="stat-card-value">
-          {pendingCount}
-          <span className="status-pill status-pending" style={{ fontSize: 11, padding: '1px 8px' }}>
-            <span className="status-dot" /> Pending
-          </span>
-        </div>
-      </div>
-
-      <div
-        className="stat-card"
-        onClick={() => {
-          onSelectFilter?.('REVOKED');
-          onNavigate?.('devices');
-        }}
-      >
-        <div className="stat-card-title">Revoked</div>
-        <div className="stat-card-value">
-          {stats.revoked ?? 0}
-          <span className="status-pill status-revoked" style={{ fontSize: 11, padding: '1px 8px' }}>
-            <span className="status-dot" /> Revoked
-          </span>
-        </div>
-      </div>
+          <span className="stat-card-value">{card.value}</span>
+          <span className="stat-card-caption">{card.caption}</span>
+        </button>
+      ))}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Layout, Modal, message } from 'antd';
+import { Alert, Button, Layout, Modal, Space, message } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import './rms.css';
 import {
   AuditRecord,
@@ -316,8 +317,16 @@ export default function App() {
                   <div className="page-header">
                     <div>
                       <h1 className="page-title">Fleet Overview</h1>
-                      <div className="page-subtitle">Real-time status and telemetry of deployed router fleet.</div>
+                      <div className="page-subtitle">A live view of connectivity, ownership, and router health.</div>
                     </div>
+                    <Space>
+                      {(user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN') && (
+                        <Button type="primary" icon={<PlusOutlined />} onClick={() => setView('add-devices')}>
+                          Add device
+                        </Button>
+                      )}
+                      <span className="page-context">Updated {refreshing ? 'now' : 'just now'}</span>
+                    </Space>
                   </div>
 
                   <StatsBar
@@ -366,6 +375,11 @@ export default function App() {
                       <h1 className="page-title">Device Fleet Inventory</h1>
                       <div className="page-subtitle">All enrolled routers reporting telemetry to RMS.</div>
                     </div>
+                    {(user.role === 'SUPER_ADMIN' || user.role === 'ORG_ADMIN') && (
+                      <Button type="primary" icon={<PlusOutlined />} onClick={() => setView('add-devices')}>
+                        Add device
+                      </Button>
+                    )}
                   </div>
 
                   <DeviceList

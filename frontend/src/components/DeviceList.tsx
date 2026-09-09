@@ -83,34 +83,16 @@ export default function DeviceList({
 
   const columns: ColumnsType<Device> = [
     {
-      title: 'Serial Number',
-      dataIndex: 'serial_number',
-      key: 'serial_number',
-      render: (serial: string, record: Device) => (
-        <Button
-          type="link"
-          style={{ padding: 0, fontWeight: 600 }}
-          className="code-font"
-          onClick={() => onSelectDevice(record)}
-        >
-          {serial}
-        </Button>
-      ),
-    },
-    {
-      title: 'Device Name',
-      dataIndex: 'name',
-      key: 'name',
-      render: (name: string) => (name ? <span>{name}</span> : <span style={{ color: '#94a3b8' }}>—</span>),
-    },
-    {
-      title: 'LAN MAC',
-      dataIndex: 'lan_mac',
-      key: 'lan_mac',
-      render: (mac: string) => (
-        <span className="code-font" style={{ color: '#475569' }}>
-          {mac || '—'}
-        </span>
+      title: 'Device',
+      key: 'device',
+      render: (_, record: Device) => (
+        <button type="button" className="device-identity" onClick={() => onSelectDevice(record)}>
+          <span className="device-avatar" aria-hidden="true">{(record.name || record.model || 'R').slice(0, 1).toUpperCase()}</span>
+          <span className="device-identity-copy">
+            <strong>{record.name || 'Unnamed device'}</strong>
+            <span className="code-font">{record.serial_number}</span>
+          </span>
+        </button>
       ),
     },
     {
@@ -118,41 +100,32 @@ export default function DeviceList({
       dataIndex: 'model',
       key: 'model',
       render: (model: string, r: Device) => (
-        <span>
-          {model || 'Niseva Router'}{' '}
+        <span className="device-model">
+          <strong>{model || 'Niseva Router'}</strong>
           {r.firmware_version && (
-            <span style={{ fontSize: 11, color: '#64748b' }}>v{r.firmware_version}</span>
+            <span>Firmware v{r.firmware_version}</span>
           )}
         </span>
       ),
     },
     {
-      title: 'Tags',
-      dataIndex: 'tags',
-      key: 'tags',
-      render: (itemTags: string[]) => (
-        <Space size={[0, 4]} wrap>
-          {itemTags && itemTags.length > 0 ? (
-            itemTags.map(t => (
-              <Tag color="blue" key={t} style={{ fontSize: 11, borderRadius: 4 }}>
-                {t}
-              </Tag>
-            ))
-          ) : (
-            <span style={{ color: '#94a3b8', fontSize: 12 }}>None</span>
-          )}
-        </Space>
+      title: 'Network identity',
+      key: 'identity',
+      render: (_, record: Device) => (
+        <span className="device-network">
+          <span className="code-font">{record.lan_mac || '—'}</span>
+          <span>{record.last_seen ? new Date(record.last_seen).toLocaleString() : 'Never seen'}</span>
+        </span>
       ),
     },
     {
-      title: 'Groups',
-      dataIndex: 'groups',
-      key: 'groups',
-      render: (itemGroups: string[]) => (
+      title: 'Tags & groups',
+      key: 'labels',
+      render: (_, record: Device) => (
         <Space size={[0, 4]} wrap>
-          {itemGroups && itemGroups.length > 0 ? itemGroups.map(g => (
-            <Tag color="geekblue" key={g} style={{ fontSize: 11, borderRadius: 4 }}>{g}</Tag>
-          )) : <span style={{ color: '#94a3b8', fontSize: 12 }}>None</span>}
+          {(record.tags || []).map(t => <Tag key={`tag-${t}`}>{t}</Tag>)}
+          {(record.groups || []).map(g => <Tag key={`group-${g}`} className="group-tag">{g}</Tag>)}
+          {!(record.tags?.length || record.groups?.length) && <span className="muted-value">No labels</span>}
         </Space>
       ),
     },
@@ -166,20 +139,14 @@ export default function DeviceList({
       title: 'Last Seen',
       dataIndex: 'last_seen',
       key: 'last_seen',
-      render: (time: string) =>
-        time ? (
-          <span style={{ fontSize: 12, color: '#64748b' }}>
-            {new Date(time).toLocaleString()}
-          </span>
-        ) : (
-          <span style={{ color: '#94a3b8' }}>Never</span>
-        ),
+      responsive: ['xl'],
+      render: (time: string) => time ? <span className="last-seen">{new Date(time).toLocaleString()}</span> : <span className="muted-value">Never</span>,
     },
     {
       title: 'Actions',
       key: 'actions',
       render: (_, record: Device) => (
-        <Space size="small">
+        <Space size="small" className="device-actions">
           {canOperate && record.status === 'ONLINE' && (
             <>
               <Tooltip title="Open LuCI WebUI (Server-side SSH tunnel)">
@@ -216,9 +183,14 @@ export default function DeviceList({
 
   return (
     <Card className="rms-card" bordered={false}>
-      <div className="filter-bar">
+      <div className="fleet-toolbar">
+        <div>
+          <div className="rms-card-title">Fleet devices</div>
+          <div className="rms-card-caption">{total} enrolled routers in this workspace</div>
+        </div>
+        <div className="filter-bar">
         <Input
-          placeholder="Search by serial number..."
+          placeholder="Search fleet"
           prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}
@@ -251,6 +223,7 @@ export default function DeviceList({
             { value: 'REVOKED', label: 'Revoked Only' },
           ]}
         />
+        </div>
       </div>
 
       <Table<Device>

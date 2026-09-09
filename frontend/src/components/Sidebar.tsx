@@ -191,9 +191,9 @@ export default function Sidebar({
 
   return (
     <Layout.Sider
-      width={240}
+      width={252}
       breakpoint="lg"
-      collapsedWidth={64}
+      collapsedWidth={72}
       className="rms-sider"
     >
       <div className="rms-brand">
@@ -202,6 +202,7 @@ export default function Sidebar({
           XNET RMS<span>v1.0</span>
         </h2>
       </div>
+      <div className="rms-nav-label">Workspace</div>
       <Menu
         mode="inline"
         selectedKeys={[currentView]}
