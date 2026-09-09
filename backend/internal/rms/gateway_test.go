@@ -73,14 +73,17 @@ func TestSameOriginNormalizesEquivalentHTTPSOrigins(t *testing.T) {
 }
 
 func TestTunnelOriginAllowsAuthenticatedDashboardOrigin(t *testing.T) {
-	if !tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "https://dashboard.example:8445") {
+	if !tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "https://dashboard.example:8445", false) {
 		t.Fatal("dashboard origin should be accepted for an authenticated tunnel session")
 	}
-	if tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "https://other.example:8445") {
+	if tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "https://other.example:8445", false) {
 		t.Fatal("unrelated origin should remain rejected")
 	}
-	if !tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "null") {
+	if !tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "null", true) {
 		t.Fatal("opaque LuCI origin should be accepted after session authentication")
+	}
+	if tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "null", false) {
+		t.Fatal("opaque terminal origin should remain rejected")
 	}
 }
 

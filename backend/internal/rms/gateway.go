@@ -136,8 +136,8 @@ func forwardLuciRequestHeaders(src http.Header) http.Header {
 	return dst
 }
 
-func tunnelOriginAllowed(publicURL, host, origin string) bool {
-	if origin == "" || origin == "null" {
+func tunnelOriginAllowed(publicURL, host, origin string, allowOpaque bool) bool {
+	if origin == "" || (allowOpaque && origin == "null") {
 		return true
 	}
 	if sameOrigin("https://"+host, origin) {
@@ -337,7 +337,7 @@ func (g *Gateway) Handler() http.Handler {
 		}
 		if origin := r.Header.Get("Origin"); origin != "" {
 			expected := "https://" + r.Host
-			if !tunnelOriginAllowed(g.Config.PublicURL, r.Host, origin) {
+			if !tunnelOriginAllowed(g.Config.PublicURL, r.Host, origin, session.Protocol == "SSH_LUCI") {
 				log.Printf("rms tunnel origin rejected host=%q origin=%q expected=%q path=%s", r.Host, origin, expected, r.URL.Path)
 				fail(w, 403, "origin rejected")
 				return
