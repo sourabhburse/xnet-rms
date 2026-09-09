@@ -189,7 +189,7 @@ export default function App() {
         'POST',
         { device_id: dev.id, protocol: 'SSH_LUCI' }
       );
-      message.success({ content: 'LuCI session authorized!', key: 'luci' });
+      message.success({ content: 'LuCI tunnel ready; router login required.', key: 'luci' });
       window.open(session.launch_url, '_blank');
       refreshData();
     } catch (err) {

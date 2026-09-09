@@ -33,6 +33,27 @@ func TestCacheableLuCIAsset(t *testing.T) {
 	}
 }
 
+func TestForwardLuciRequestHeadersPreservesRouterLoginCookie(t *testing.T) {
+	in := http.Header{
+		"Cookie":     []string{"__Host-rms_session=rms-session; sysauth=router-session"},
+		"Connection": []string{"keep-alive"},
+		"User-Agent": []string{"test-browser"},
+	}
+	out := forwardLuciRequestHeaders(in)
+	if got := out.Get("Cookie"); got != "sysauth=router-session" {
+		t.Fatalf("router login cookie was not forwarded: %q", got)
+	}
+	if out.Get("Connection") != "" {
+		t.Fatal("hop-by-hop connection header was forwarded")
+	}
+	if out.Get("User-Agent") != "test-browser" {
+		t.Fatal("browser headers were not preserved")
+	}
+	if !safeHeader("Cookie") {
+		t.Fatal("router login cookie is not an allowed proxy header")
+	}
+}
+
 func TestWsNetConnAdapter(t *testing.T) {
 	pr, pw := io.Pipe()
 	defer pr.Close()

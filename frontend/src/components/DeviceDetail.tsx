@@ -124,7 +124,7 @@ export default function DeviceDetail({
         type: 'success',
         title: 'LuCI Session Launched',
         message:
-          'LuCI WebUI is opening in a new tab via server-side SSH tunnel. If it was blocked by your browser, click below.',
+          'LuCI is opening in a new tab. Sign in with the router administrator credentials when prompted. If it was blocked by your browser, click below.',
         launchUrl: res.launch_url,
         sessionId: res.id,
       });

@@ -10,7 +10,7 @@
 #include <time.h>
 #include "parson.h"
 
-#define AGENT_VERSION "2.1.2"
+#define AGENT_VERSION "2.1.3"
 #define DEFAULT_SERVER ""
 #define DEFAULT_MQTT_HOST ""
 #define DEFAULT_MQTT_PORT 8883
@@ -97,7 +97,7 @@ void check_rollback_watchdog(struct uloop_timeout *t);
 void cancel_rollback_watchdog(void);
 void handle_sysupgrade(const char *url, const char *sha256);
 
-// Remote Access Tunnel (LuCI SSO & Dropbear SSH Bridge)
+// Remote Access Tunnel (router-login LuCI & Dropbear SSH Bridge)
 int open_reverse_tunnel(const char *session_id, const char *protocol, const char *gateway_url, int ttl_seconds, const char *public_key);
 void check_reverse_tunnel(void);
 void close_reverse_tunnel(void);
