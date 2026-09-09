@@ -72,6 +72,15 @@ func TestSameOriginNormalizesEquivalentHTTPSOrigins(t *testing.T) {
 	}
 }
 
+func TestTunnelOriginAllowsAuthenticatedDashboardOrigin(t *testing.T) {
+	if !tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "https://dashboard.example:8445") {
+		t.Fatal("dashboard origin should be accepted for an authenticated tunnel session")
+	}
+	if tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "https://other.example:8445") {
+		t.Fatal("unrelated origin should remain rejected")
+	}
+}
+
 func TestWsNetConnAdapter(t *testing.T) {
 	pr, pw := io.Pipe()
 	defer pr.Close()

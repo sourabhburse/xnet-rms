@@ -136,6 +136,20 @@ func forwardLuciRequestHeaders(src http.Header) http.Header {
 	return dst
 }
 
+func tunnelOriginAllowed(publicURL, host, origin string) bool {
+	if origin == "" {
+		return true
+	}
+	if sameOrigin("https://"+host, origin) {
+		return true
+	}
+	// LuCI can be embedded or submitted from the authenticated dashboard
+	// while the tunnel itself lives on the per-session hostname. The session
+	// cookie is host-only, so this does not grant access without the tunnel's
+	// own browser session authorization above.
+	return publicURL != "" && sameOrigin(publicURL, origin)
+}
+
 // The RMS session authorizes the tunnel only. LuCI authenticates the browser
 // with the router's own login page and sysauth cookie.
 func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pair) {
@@ -323,7 +337,7 @@ func (g *Gateway) Handler() http.Handler {
 		}
 		if origin := r.Header.Get("Origin"); origin != "" {
 			expected := "https://" + r.Host
-			if !sameOrigin(expected, origin) {
+			if !tunnelOriginAllowed(g.Config.PublicURL, r.Host, origin) {
 				log.Printf("rms tunnel origin rejected host=%q origin=%q expected=%q path=%s", r.Host, origin, expected, r.URL.Path)
 				fail(w, 403, "origin rejected")
 				return
