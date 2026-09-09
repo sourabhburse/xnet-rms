@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Layout, Menu } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -44,7 +44,7 @@ export default function Sidebar({
   items.push({
     key: 'dashboard',
     icon: <DashboardOutlined />,
-    label: 'Fleet Overview',
+    label: 'Overview',
   });
 
   // Group 2: Devices
@@ -52,7 +52,7 @@ export default function Sidebar({
     {
       key: 'devices',
       icon: <HddOutlined />,
-      label: 'Device Fleet',
+      label: 'Devices',
     },
     {
       key: 'groups',
@@ -99,52 +99,36 @@ export default function Sidebar({
     );
   }
 
+  deviceChildren.push({
+    key: 'profiles',
+    icon: <LineChartOutlined />,
+    label: 'Monitoring templates',
+  });
+
   items.push({
-    key: 'grp-devices',
+    key: 'grp-management',
     icon: <HddOutlined />,
-    label: 'Device Management',
+    label: 'Management',
     children: deviceChildren,
   });
 
-  // Group 3: Remote Access
+  // Group 2: RMS Connect
   if (isOperator) {
     items.push({
-      key: 'grp-remote',
+      key: 'grp-connect',
       icon: <LinkOutlined />,
-      label: 'Remote Access',
+      label: 'RMS Connect',
       children: [
         {
           key: 'sessions',
           icon: <LinkOutlined />,
-          label: 'Remote Sessions',
+          label: 'Remote access',
         },
       ],
     });
   }
 
-  // Group 4: Configuration
-  const configChildren: MenuItem[] = [];
-  if (isOrgAdmin) {
-    configChildren.push({
-      key: 'tags',
-      icon: <TagsOutlined />,
-      label: 'Customer Tags',
-    });
-  }
-  configChildren.push({
-    key: 'profiles',
-    icon: <LineChartOutlined />,
-    label: 'Monitoring Profiles',
-  });
-
-  items.push({
-    key: 'grp-config',
-    icon: <LineChartOutlined />,
-    label: 'Configuration',
-    children: configChildren,
-  });
-
-  // Group 5: Administration
+  // Group 3: Administration
   if (isOrgAdmin) {
     const adminChildren: MenuItem[] = [
       {
@@ -156,6 +140,11 @@ export default function Sidebar({
         key: 'enrollment-tokens',
         icon: <KeyOutlined />,
         label: 'Enrollment Tokens',
+      },
+      {
+        key: 'tags',
+        icon: <TagsOutlined />,
+        label: 'Customer Tags',
       },
       {
         key: 'audit-logs',
@@ -187,7 +176,30 @@ export default function Sidebar({
     });
   }
 
-  const [openKeys, setOpenKeys] = useState<string[]>(['grp-devices', 'grp-remote']);
+  const [openKeys, setOpenKeys] = useState<string[]>(['grp-management']);
+
+  const parentByView: Record<string, string> = {
+    devices: 'grp-management',
+    groups: 'grp-management',
+    'add-devices': 'grp-management',
+    'available-to-claim': 'grp-management',
+    'registration-requests': 'grp-management',
+    profiles: 'grp-management',
+    sessions: 'grp-connect',
+    users: 'grp-admin',
+    'enrollment-tokens': 'grp-admin',
+    tags: 'grp-admin',
+    'audit-logs': 'grp-admin',
+    organizations: 'grp-admin',
+    bundles: 'grp-admin',
+  };
+
+  useEffect(() => {
+    const parent = parentByView[currentView];
+    if (parent && !openKeys.includes(parent)) {
+      setOpenKeys(keys => [...keys, parent]);
+    }
+  }, [currentView]);
 
   return (
     <Layout.Sider
@@ -209,7 +221,10 @@ export default function Sidebar({
         openKeys={openKeys}
         items={items}
         onOpenChange={setOpenKeys}
-        onClick={e => onSelectView(e.key)}
+        onClick={e => {
+          if (e.key.startsWith('grp-')) return;
+          onSelectView(e.key);
+        }}
       />
     </Layout.Sider>
   );
