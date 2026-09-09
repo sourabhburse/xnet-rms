@@ -141,6 +141,16 @@ func forwardLuciRequestHeaders(src http.Header) http.Header {
 	return dst
 }
 
+func luciUpstreamPath(requestURI string) string {
+	if requestURI == "/" {
+		return "/cgi-bin/luci/"
+	}
+	if strings.HasPrefix(requestURI, "/ubus") && (requestURI == "/ubus" || strings.HasPrefix(requestURI, "/ubus/")) {
+		return "/cgi-bin/luci/admin/ubus" + strings.TrimPrefix(requestURI, "/ubus")
+	}
+	return requestURI
+}
+
 func tunnelOriginAllowed(publicURL, host, origin string, allowOpaque bool) bool {
 	if origin == "" || (allowOpaque && origin == "null") {
 		return true
@@ -171,15 +181,10 @@ func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pai
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
-	path := r.URL.RequestURI()
-	if path == "/" {
-		path = "/cgi-bin/luci/"
-	} else if strings.HasPrefix(path, "/ubus") && (path == "/ubus" || strings.HasPrefix(path, "/ubus/")) {
-		// LuCI's browser-side RPC client uses /ubus/, while this firmware
-		// exposes the ubus CGI handler below /cgi-bin/luci/admin/ubus.
-		// Keep the browser URL unchanged and translate only the upstream hop.
-		path = "/cgi-bin/luci/admin/ubus" + strings.TrimPrefix(path, "/ubus")
-	}
+	// LuCI's browser-side RPC client uses /ubus/, while this firmware exposes
+	// the ubus CGI handler below /cgi-bin/luci/admin/ubus. Keep the browser URL
+	// unchanged and translate only the upstream hop.
+	path := luciUpstreamPath(r.URL.RequestURI())
 	out := r.Clone(r.Context())
 	out.URL = &url.URL{Scheme: "http", Host: "127.0.0.1", Path: path}
 	if q := strings.IndexByte(path, '?'); q >= 0 {

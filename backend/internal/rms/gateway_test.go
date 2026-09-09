@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -43,12 +42,7 @@ func TestLuciUpstreamPathMapsUbusEndpoint(t *testing.T) {
 		{"/ubus", "/cgi-bin/luci/admin/ubus"},
 		{"/luci-static/resources/ui.js?v=1", "/luci-static/resources/ui.js?v=1"},
 	} {
-		path := tc.request
-		if path == "/" {
-			path = "/cgi-bin/luci/"
-		} else if strings.HasPrefix(path, "/ubus") && (path == "/ubus" || strings.HasPrefix(path, "/ubus/")) {
-			path = "/cgi-bin/luci/admin/ubus" + strings.TrimPrefix(path, "/ubus")
-		}
+		path := luciUpstreamPath(tc.request)
 		if path != tc.want {
 			t.Errorf("upstream path for %q = %q, want %q", tc.request, path, tc.want)
 		}
