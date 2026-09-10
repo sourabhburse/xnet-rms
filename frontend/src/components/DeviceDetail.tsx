@@ -68,6 +68,25 @@ function numberValue(value: unknown) {
   return Number.isFinite(number) ? number : null;
 }
 
+function formatBytes(value: unknown) {
+  const number = numberValue(value);
+  if (number == null) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let scaled = Math.max(0, number);
+  let unit = 0;
+  while (scaled >= 1024 && unit < units.length - 1) { scaled /= 1024; unit++; }
+  return `${scaled >= 100 ? scaled.toFixed(0) : scaled >= 10 ? scaled.toFixed(1) : scaled.toFixed(2)} ${units[unit]}`;
+}
+
+function formatDuration(value: unknown) {
+  const seconds = numberValue(value);
+  if (seconds == null) return "—";
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
 function fieldMatches(key: string, field: SnapshotField, terms: string[]) {
   const haystack = `${key} ${field.label ?? ""} ${field.unit ?? ""}`.toLowerCase();
   return terms.some((term) => haystack.includes(term));
@@ -241,9 +260,15 @@ export default function DeviceDetail({
     rsrp: findMetric(latestSources, ["rsrp"]),
     sinr: findMetric(latestSources, ["sinr"]),
     cpu: findMetric(latestSources, ["cpu", "processor"]),
-    memory: findMetric(latestSources, ["memory", "ram"]),
+    memory: findMetric(latestSources, ["memory_used_bytes"]),
+    memoryPercent: findMetric(latestSources, ["memory_used_percent"]),
     throughput: findMetric(latestSources, ["throughput", "bandwidth", "bitrate"]),
     temperature: findMetric(latestSources, ["temperature", "temp"]),
+    rssi: findMetric(latestSources, ["rssi"]),
+    uptime: findMetric(latestSources, ["uptime"]),
+    rx: findMetric(latestSources, ["rx_bytes", "received"]),
+    tx: findMetric(latestSources, ["tx_bytes", "sent"]),
+    registration: findMetric(latestSources, ["registration"]),
   }), [latestSources]);
 
   const closeSession = async () => {
@@ -346,13 +371,25 @@ export default function DeviceDetail({
             </Card>
             <Card>
               <CardHeader className="border-b border-border"><CardTitle>Live telemetry</CardTitle><CardDescription>Values from the most recent snapshot, when available</CardDescription></CardHeader>
-              <CardContent className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3">
-                <MetricCard label="RSRP" metric={metrics.rsrp} format={(value, unit) => `${displayValue(value)} ${unit || "dBm"}`} meter={metrics.rsrp ? ((numberValue(metrics.rsrp.field.value) ?? -120) + 120) * (100 / 70) : null} />
-                <MetricCard label="SINR" metric={metrics.sinr} format={(value, unit) => `${displayValue(value)} ${unit || "dB"}`} meter={metrics.sinr ? ((numberValue(metrics.sinr.field.value) ?? 0) + 10) * 4 : null} />
-                <MetricCard label="CPU" metric={metrics.cpu} format={(value, unit) => `${displayValue(value)}${unit ? ` ${unit}` : "%"}`} meter={metrics.cpu ? numberValue(metrics.cpu.field.value) : null} />
-                <MetricCard label="Memory" metric={metrics.memory} format={(value, unit) => `${displayValue(value)}${unit ? ` ${unit}` : "%"}`} meter={metrics.memory ? numberValue(metrics.memory.field.value) : null} />
-                <MetricCard label="Throughput" metric={metrics.throughput} meter={metrics.throughput ? 48 : null} />
-                <MetricCard label="Temperature" metric={metrics.temperature} format={(value, unit) => `${displayValue(value)} ${unit || "°C"}`} meter={metrics.temperature ? (numberValue(metrics.temperature.field.value) ?? 0) : null} />
+              <CardContent className="space-y-3 p-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <MetricCard label="RSRP" metric={metrics.rsrp} format={(value, unit) => `${displayValue(value)} ${unit || "dBm"}`} meter={metrics.rsrp ? ((numberValue(metrics.rsrp.field.value) ?? -120) + 120) * (100 / 70) : null} />
+                  <MetricCard label="SINR" metric={metrics.sinr} format={(value, unit) => `${displayValue(value)} ${unit || "dB"}`} meter={metrics.sinr ? ((numberValue(metrics.sinr.field.value) ?? 0) + 10) * 4 : null} />
+                  <MetricCard label="CPU" metric={metrics.cpu} format={(value, unit) => `${displayValue(value)}${unit ? ` ${unit}` : "%"}`} meter={metrics.cpu ? numberValue(metrics.cpu.field.value) : null} />
+                  <MetricCard label="Memory" metric={metrics.memory || metrics.memoryPercent} format={(value) => metrics.memory ? formatBytes(value) : `${displayValue(value)} %`} meter={metrics.memoryPercent ? numberValue(metrics.memoryPercent.field.value) : null} />
+                  <MetricCard label="Throughput" metric={metrics.throughput} meter={metrics.throughput ? 48 : null} />
+                  <MetricCard label="Temperature" metric={metrics.temperature} format={(value, unit) => `${displayValue(value)} ${unit || "°C"}`} meter={metrics.temperature ? (numberValue(metrics.temperature.field.value) ?? 0) : null} />
+                </div>
+                <div className="border-t border-border pt-3">
+                  <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Available on this device</div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <MetricCard label="RSSI" metric={metrics.rssi} format={(value, unit) => `${displayValue(value)} ${unit || "dBm"}`} />
+                    <MetricCard label="Uptime" metric={metrics.uptime} format={(value) => formatDuration(value)} />
+                    <MetricCard label="Data RX" metric={metrics.rx} format={(value) => formatBytes(value)} />
+                    <MetricCard label="Data TX" metric={metrics.tx} format={(value) => formatBytes(value)} />
+                    <MetricCard label="Registration" metric={metrics.registration} />
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -361,7 +398,7 @@ export default function DeviceDetail({
         <TabsContent value="telemetry" className="mt-4">
           {snapshots.length === 0 ? <Card><CardContent className="flex min-h-36 flex-col items-center justify-center gap-1 p-6 text-center"><Loader2 className={cn("mb-1 size-5 text-muted-foreground", loadingSnapshots && "animate-spin")} /><p className="text-[13px] font-medium">No telemetry snapshots collected yet</p><p className="text-xs text-muted-foreground">Assign a monitoring profile to this device to collect periodic telemetry.</p></CardContent></Card> : <div className="flex flex-col gap-4">{snapshots.map((snapshot) => <Card key={snapshot.source_id}>
             <CardHeader className="flex-row items-start justify-between border-b border-border"><div><CardTitle>{snapshot.definition?.name || snapshot.source_id}</CardTitle><CardDescription className="mt-1">Observed {new Date(snapshot.observed_at).toLocaleString()}</CardDescription></div><Badge variant={snapshot.status === "ok" ? "ok" : "down"}>{snapshot.status} · {snapshot.stale ? "stale" : "fresh"}</Badge></CardHeader>
-            <CardContent className="p-0">{snapshot.error && <div className="m-4 rounded-md border border-down-border bg-down-bg px-3 py-2 text-[12px] text-down">{snapshot.error}</div>}<Table><TableHeader><TableRow><TableHead>Metric</TableHead><TableHead>Current value</TableHead><TableHead>Type</TableHead></TableRow></TableHeader><TableBody>{Object.entries(snapshot.fields || {}).map(([id, field]) => <TableRow key={id}><TableCell className="font-medium">{field.label || id}</TableCell><TableCell className="font-mono text-[11px]">{displayValue(field.value)} {field.unit || ""}</TableCell><TableCell><Badge variant="secondary" className="font-normal capitalize">{field.kind || "text"}</Badge></TableCell></TableRow>)}</TableBody></Table></CardContent>
+            <CardContent className="p-0">{snapshot.error && <div className="m-4 rounded-md border border-down-border bg-down-bg px-3 py-2 text-[12px] text-down">{snapshot.error}</div>}<div className="max-h-[520px] overflow-auto"><Table><TableHeader><TableRow><TableHead>Metric</TableHead><TableHead>Current value</TableHead><TableHead>Type</TableHead></TableRow></TableHeader><TableBody>{Object.entries(snapshot.fields || {}).map(([id, field]) => <TableRow key={id}><TableCell className="font-medium">{field.label || id}</TableCell><TableCell className="font-mono text-[11px]">{displayValue(field.value)} {field.unit || ""}</TableCell><TableCell><Badge variant="secondary" className="font-normal capitalize">{field.kind || "text"}</Badge></TableCell></TableRow>)}</TableBody></Table></div></CardContent>
           </Card>)}</div>}
         </TabsContent>
 
@@ -375,7 +412,7 @@ export default function DeviceDetail({
               </div>
               {selectedField ? <div className="mt-5 h-[280px] w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey="time" stroke="var(--muted-foreground)" tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} tickLine={false} axisLine={false} /><YAxis stroke="var(--muted-foreground)" tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} tickLine={false} axisLine={false} /><Tooltip contentStyle={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--popover)", color: "var(--popover-foreground)", fontSize: 12 }} /><Area type="monotone" dataKey="value" stroke="none" fill="var(--accent)" fillOpacity={0.75} /><Line type="monotone" dataKey="value" stroke="var(--chart-2)" strokeWidth={2} dot={{ r: 2, fill: "var(--chart-2)" }} activeDot={{ r: 4, fill: "var(--chart-2)" }} connectNulls={false} /></LineChart></ResponsiveContainer></div> : <div className="mt-5 rounded-lg border border-dashed border-border px-4 py-10 text-center text-[12px] text-muted-foreground">Select a numeric metric above to view its historical time series.</div>}
               <div className="mt-6 flex items-center gap-2 text-[12px] font-semibold text-foreground"><History className="size-4 text-primary" />Snapshot history log</div>
-              <div className="mt-2 overflow-hidden rounded-lg border border-border"><Table><TableHeader><TableRow><TableHead>Observed time</TableHead><TableHead>Status</TableHead><TableHead>Values snapshot</TableHead></TableRow></TableHeader><TableBody>{loadingHistory ? <TableRow><TableCell colSpan={3} className="h-20 text-center text-xs text-muted-foreground">Loading history…</TableCell></TableRow> : historyData.slice(0, 50).map((history, index) => <TableRow key={`${history.observed_at}-${index}`}><TableCell className="whitespace-nowrap font-mono text-[10.5px]">{new Date(history.observed_at).toLocaleString()}</TableCell><TableCell><Badge variant={history.status === "ok" ? "ok" : "down"}>{history.status}</Badge></TableCell><TableCell className="max-w-[520px] truncate font-mono text-[10.5px] text-muted-foreground" title={JSON.stringify(history.fields)}>{JSON.stringify(history.fields)}</TableCell></TableRow>)}</TableBody></Table></div>
+              <div className="mt-2 max-h-[520px] overflow-auto rounded-lg border border-border"><Table><TableHeader><TableRow><TableHead>Observed time</TableHead><TableHead>Status</TableHead><TableHead>Values snapshot</TableHead></TableRow></TableHeader><TableBody>{loadingHistory ? <TableRow><TableCell colSpan={3} className="h-20 text-center text-xs text-muted-foreground">Loading history…</TableCell></TableRow> : historyData.slice(0, 50).map((history, index) => <TableRow key={`${history.observed_at}-${index}`}><TableCell className="whitespace-nowrap font-mono text-[10.5px]">{new Date(history.observed_at).toLocaleString()}</TableCell><TableCell><Badge variant={history.status === "ok" ? "ok" : "down"}>{history.status}</Badge></TableCell><TableCell className="max-w-[520px] truncate font-mono text-[10.5px] text-muted-foreground" title={JSON.stringify(history.fields)}>{JSON.stringify(history.fields)}</TableCell></TableRow>)}</TableBody></Table></div>
             </CardContent>
           </Card>
         </TabsContent>

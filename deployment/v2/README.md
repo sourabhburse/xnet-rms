@@ -36,8 +36,8 @@ Port 8443 is already occupied on this VPS. The installer does not modify Nginx,
 existing Mosquitto configuration, PostgreSQL cluster settings, or firewall rules.
 Inbound reachability of the new ports must be checked after installation.
 
-Test raw retention is **7 days**, summaries **30 days**. Production retention
-remains undecided. Each service has separate CPU/memory limits. These are initial
+Test raw retention is **30 days**, summaries **365 days**. Production retention
+should be revisited after capacity measurements. Each service has separate CPU/memory limits. These are initial
 test limits, not evidence of 10,000-router capacity.
 
 ## Verify

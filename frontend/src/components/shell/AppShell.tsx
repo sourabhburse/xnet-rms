@@ -55,7 +55,7 @@ export function AppShell({
         />
       </div>
 
-      <div className="flex min-w-0 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-col">
         <Topbar
           user={user}
           crumb={crumb}
@@ -71,7 +71,7 @@ export function AppShell({
           onToggleTheme={onToggleTheme}
           onSignOut={onSignOut}
         />
-        <main className="flex-1 overflow-y-auto bg-background">{children}</main>
+        <main className="min-h-0 flex-1 overflow-y-auto bg-background">{children}</main>
       </div>
     </div>
   );

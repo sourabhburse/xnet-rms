@@ -10,6 +10,7 @@ import {
   ScrollText,
   Building2,
   TerminalSquare,
+  FileBarChart,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -77,6 +78,11 @@ export function AppSidebar({
       ],
     });
   }
+
+  sections.push({
+    heading: "Monitoring",
+    items: [{ key: "reports", label: "Telemetry reports", icon: FileBarChart }],
+  });
 
   if (isOrgAdmin) {
     const admin: NavEntry[] = [

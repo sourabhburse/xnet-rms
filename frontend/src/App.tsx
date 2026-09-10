@@ -34,6 +34,7 @@ import TagsManager from './components/TagsManager';
 import GroupsManager from './components/GroupsManager';
 import SessionsManager from './components/SessionsManager';
 import AdminViews from './components/AdminViews';
+import ReportsView from './components/ReportsView';
 import Login from './Login';
 
 export default function App() {
@@ -162,7 +163,7 @@ export default function App() {
       }
 
       // Fetch view-specific dataset
-      if (view === 'devices' || view === 'dashboard' || view === 'groups') {
+      if (view === 'devices' || view === 'dashboard' || view === 'groups' || view === 'reports') {
         const lookupQuery = deviceSerial || searchQuery;
         const params = new URLSearchParams({
           page: String(page),
@@ -290,6 +291,7 @@ export default function App() {
     'available-to-claim': 'Devices',
     'registration-requests': 'Devices',
     sessions: 'Sessions',
+    reports: 'Telemetry reports',
     tags: 'Customer tags',
     users: 'Users',
     'enrollment-tokens': 'Enrollment tokens',
@@ -488,6 +490,9 @@ export default function App() {
                 onRefresh={refreshData}
               />
             )}
+            {view === 'reports' && (
+              <ReportsView devices={devices} groups={groups} tags={tags} selectedOrg={selectedOrg} />
+            )}
             {['users', 'enrollment-tokens', 'organizations', 'profiles', 'bundles', 'audit-logs'].includes(view) && (
               <AdminViews
                 view={view}
@@ -495,6 +500,7 @@ export default function App() {
                 data={adminData}
                 organizations={organizations}
                 groups={groups}
+                tags={tags}
                 selectedOrg={selectedOrg}
                 loading={loading || refreshing}
                 onRefresh={refreshData}

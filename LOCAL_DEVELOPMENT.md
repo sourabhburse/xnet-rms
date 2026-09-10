@@ -171,8 +171,8 @@ export RMS_MQTT_URL='tls://localhost:8883'
 export RMS_MQTT_HOST='localhost'
 export RMS_TUNNEL_DOMAIN='localhost'
 export RMS_REVOKED_DIR="$PWD/../.local/revoked"
-export RMS_RAW_DAYS=7
-export RMS_SUMMARY_DAYS=30
+export RMS_RAW_DAYS=30
+export RMS_SUMMARY_DAYS=365
 mkdir -p "$RMS_REVOKED_DIR"
 go run ./cmd/server -mode core
 ```

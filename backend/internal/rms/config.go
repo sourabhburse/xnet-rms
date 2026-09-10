@@ -44,6 +44,9 @@ func (c Config) Validate() error {
 	if c.RawDays < 1 || c.SummaryDays < c.RawDays {
 		return errors.New("explicit approved RMS_RAW_DAYS and RMS_SUMMARY_DAYS >= raw retention required")
 	}
+	if c.RawDays < 30 {
+		return errors.New("RMS_RAW_DAYS must be at least 30 for telemetry reporting")
+	}
 	return nil
 }
 func randomID() string {

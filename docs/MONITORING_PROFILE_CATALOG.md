@@ -86,6 +86,21 @@ uptime, temperature excursions, storage exhaustion risk, and stale-source
 freshness. Keep raw snapshots for diagnosis and extract only declared fields
 for filtering and charts.
 
+## Reporting and retention
+
+The RMS core keeps raw snapshots for the configured `RMS_RAW_DAYS` window and
+rolls completed hours into `hourly_summaries`. The supported baseline is at
+least 30 raw days; the test deployment keeps hourly summaries for 365 days.
+Use `GET /api/v1/reports/telemetry` for a bounded hourly or daily report with
+`device_id`, `group_id`, or `tag_id` scope, `source`, `from`, and `to` query
+parameters. Gauge reports expose average/minimum/maximum values; counters
+expose deltas and reset counts. States are represented by their last value and
+sample count rather than being averaged.
+
+The device detail history remains a diagnostic view. Reports should be used
+for longer windows and exports so the browser never loads the full raw
+snapshot table.
+
 ## Organization and group model
 
 Organizations own users, enrollment tokens, tags, groups, and devices. A user

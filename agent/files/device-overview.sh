@@ -62,6 +62,7 @@ mem_available_kb=$(awk '/^MemAvailable:/ {print $2; exit}' /proc/meminfo 2>/dev/
 if valid_number "${mem_total_kb:-}" && valid_number "${mem_available_kb:-}" && [ "$mem_total_kb" -gt 0 ] 2>/dev/null; then
 	add_number "memory_total_bytes" "$((mem_total_kb * 1024))"
 	add_number "memory_available_bytes" "$((mem_available_kb * 1024))"
+	add_number "memory_used_bytes" "$(((mem_total_kb - mem_available_kb) * 1024))"
 	add_number "memory_used_percent" "$(awk -v total="$mem_total_kb" -v available="$mem_available_kb" 'BEGIN { printf "%.1f", 100*(total-available)/total }')"
 fi
 

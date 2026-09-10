@@ -34,8 +34,8 @@ SQL
 bash ./install-files.sh
 install -m 600 contabo-core.env.example /etc/xnet-rms/core.env
 install -m 600 contabo-tunnel.env.example /etc/xnet-rms/tunnel.env
-# Seven-day retention is for this isolated test installation only.
-printf '\nDATABASE_URL=postgres://xnet_rms_v2:%s@127.0.0.1:5432/xnet_rms_v2?sslmode=disable\nJWT_SECRET=%s\nRMS_RAW_DAYS=7\nRMS_SUMMARY_DAYS=30\n' "$password" "$jwt" >> /etc/xnet-rms/core.env
+# Keep raw telemetry for at least 30 days; hourly summaries support longer reports.
+printf '\nDATABASE_URL=postgres://xnet_rms_v2:%s@127.0.0.1:5432/xnet_rms_v2?sslmode=disable\nJWT_SECRET=%s\nRMS_RAW_DAYS=30\nRMS_SUMMARY_DAYS=365\n' "$password" "$jwt" >> /etc/xnet-rms/core.env
 RMS_PKI_DIR=/etc/xnet-rms/authority /opt/xnet-rms/xnet-rms -mode init-ca -hosts 'xnet-rms-test.duckdns.org,*.xnet-rms-test.duckdns.org'
 RMS_AUTHORITY_DIR=/etc/xnet-rms/authority bash ./provision-trust.sh
 install -m 0755 refresh-public-certificates.sh /opt/xnet-rms/refresh-public-certificates

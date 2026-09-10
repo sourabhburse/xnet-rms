@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Building2, Check, Copy, KeyRound, LineChart, Plus, RefreshCw, ScrollText, ShieldAlert, StopCircle, TerminalSquare, Users } from "lucide-react";
 import { toast } from "sonner";
 
-import { AuditRecord, CollectorBundle, DeviceGroup, EnrollmentToken, Organization, Profile, User } from "../types";
+import { AuditRecord, CollectorBundle, DeviceGroup, EnrollmentToken, Organization, Profile, TagItem, User } from "../types";
 import { api, formatApiError } from "../api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,9 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import MonitoringTemplates from "./MonitoringTemplates";
 
-interface AdminViewsProps { view: string; currentUser: User; data: any[]; organizations: Organization[]; groups: DeviceGroup[]; selectedOrg: string; loading: boolean; onRefresh: () => void; }
+interface AdminViewsProps { view: string; currentUser: User; data: any[]; organizations: Organization[]; groups: DeviceGroup[]; tags: TagItem[]; selectedOrg: string; loading: boolean; onRefresh: () => void; }
 const selectClass = "h-9 w-full rounded-md border border-input bg-card px-3 text-[12px] text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/25";
 
 function AdminHeader({ title, description, icon: Icon, loading, onRefresh, actionLabel, onAction }: { title: string; description: string; icon: React.ComponentType<{ className?: string }>; loading: boolean; onRefresh: () => void; actionLabel?: string; onAction?: () => void }) {
@@ -23,7 +24,7 @@ function EmptyTable({ colSpan, loading, text }: { colSpan: number; loading: bool
   return <TableRow><TableCell colSpan={colSpan} className="h-28 text-center text-xs text-muted-foreground">{loading ? "Loading…" : text}</TableCell></TableRow>;
 }
 
-export default function AdminViews({ view, currentUser, data, organizations, groups, selectedOrg, loading, onRefresh }: AdminViewsProps) {
+export default function AdminViews({ view, currentUser, data, organizations, groups, tags, selectedOrg, loading, onRefresh }: AdminViewsProps) {
   const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -65,6 +66,8 @@ export default function AdminViews({ view, currentUser, data, organizations, gro
   const disableUser = async () => { if (!disableTarget) return; try { await api(`users/${disableTarget.id}/disable`, "POST", {}); toast.success("User disabled"); setDisableTarget(null); onRefresh(); } catch (err) { toast.error(formatApiError(err).message); } };
   const revokeToken = async () => { if (!revokeTarget) return; try { await api(`enrollment-tokens/${revokeTarget.id}`, "DELETE"); toast.success("Token revoked"); setRevokeTarget(null); onRefresh(); } catch (err) { toast.error(formatApiError(err).message); } };
   const scopeSelect = isSuperAdmin && <select aria-label="Customer organization" value={targetOrg} onChange={(event) => setTargetOrg(event.target.value)} className={selectClass}><option value="">Select organization</option>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select>;
+
+  if (view === "profiles") return <MonitoringTemplates currentUser={currentUser} data={data as Profile[]} organizations={organizations} groups={groups} tags={tags} selectedOrg={selectedOrg} loading={loading} onRefresh={onRefresh} />;
 
   if (view === "users") return <div className="mx-auto flex max-w-[1200px] flex-col gap-4"><AdminHeader title="User accounts" description="Manage platform users, roles, and access permissions." icon={Users} loading={loading} onRefresh={onRefresh} actionLabel="Add user" onAction={openCreateModal} /><Card><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Email address</TableHead><TableHead>Role</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader><TableBody>{data.length ? (data as User[]).map((item) => <TableRow key={item.id}><TableCell className="font-medium">{item.email}</TableCell><TableCell><Badge variant={item.role === "SUPER_ADMIN" || item.role === "ORG_ADMIN" ? "accent" : "secondary"} className="font-normal">{item.role.replace("_", " ")}</Badge></TableCell><TableCell><Badge variant={item.disabled ? "down" : "ok"}>{item.disabled ? "Disabled" : "Active"}</Badge></TableCell><TableCell className="text-right"><Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={item.disabled || item.id === currentUser.id} onClick={() => setDisableTarget(item)}><StopCircle className="size-3.5" />Disable</Button></TableCell></TableRow>) : <EmptyTable colSpan={4} loading={loading} text="No users in this scope." />}</TableBody></Table></CardContent></Card><Dialog open={modalOpen} onOpenChange={setModalOpen}><DialogContent><DialogHeader><DialogTitle>Create user account</DialogTitle><DialogDescription>Grant an account the minimum role needed for their work.</DialogDescription></DialogHeader><div className="space-y-4">{scopeSelect}<div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Email address</label><Input type="email" value={userForm.email} placeholder="user@organization.com" onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} /></div><div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Initial password</label><Input type="password" value={userForm.password} placeholder="Minimum 12 characters" onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} /></div><div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Role</label><select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value })} className={selectClass}><option value="ORG_ADMIN">Organization administrator</option><option value="OPERATOR">Operator</option><option value="VIEWER">Viewer</option></select></div></div><DialogFooter><Button variant="outline" onClick={closeModal} disabled={submitting}>Cancel</Button><Button onClick={handleCreate} disabled={submitting}>{submitting ? "Creating…" : "Create user"}</Button></DialogFooter></DialogContent></Dialog><ConfirmDialog open={!!disableTarget} onOpenChange={(open) => !open && setDisableTarget(null)} title="Disable user account?" description="This user will be logged out and unable to access the RMS platform." confirmLabel="Disable account" onConfirm={disableUser} /></div>;
 

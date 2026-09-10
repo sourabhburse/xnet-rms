@@ -111,8 +111,8 @@ func TestPostgresLifecycle(t *testing.T) {
 			t.Fatal("cross customer read", w.Code)
 		}
 	}
-	if w = request("POST", "/api/v1/profiles", admin, map[string]any{}); w.Code != 403 {
-		t.Fatal("customer changed profile", w.Code)
+	if w = request("POST", "/api/v1/profiles", viewer, map[string]any{}); w.Code != 403 {
+		t.Fatal("viewer changed profile", w.Code)
 	}
 	if w = request("POST", "/api/v1/sessions", viewer, map[string]any{"device_id": id, "protocol": "HTTP_LUCI"}); w.Code != 403 {
 		t.Fatal("viewer remote access", w.Code)
@@ -132,7 +132,7 @@ func TestPostgresLifecycle(t *testing.T) {
 		t.Fatal("replayed challenge", w.Code)
 	}
 	p := Profile{ID: randomID(), Version: 1, SourceID: "custom", Name: "Custom", Type: "ubus", Object: "system", Method: "info", Interval: 60, Timeout: 5, MaxOutput: 32768, Fields: []Field{{ID: "value", Path: "/value", Kind: "gauge"}}}
-	must("INSERT INTO profiles VALUES($1,1,'custom',$2)", p.ID, string(raw(p)))
+	must("INSERT INTO profiles(id,version,name,definition,organization_id) VALUES($1,1,'custom',$2,$3)", p.ID, string(raw(p)), org)
 	must("INSERT INTO assignments VALUES($1,$2,1,true)", id, p.ID)
 	acks := 0
 	core.Publish = func(topic string, v any) error {

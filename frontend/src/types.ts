@@ -19,7 +19,7 @@ export interface SnapshotField {
   label: string;
   value: unknown;
   unit?: string;
-  kind?: 'gauge' | 'counter' | 'text';
+  kind?: 'gauge' | 'counter' | 'state' | 'text';
 }
 
 export interface SnapshotSource {
@@ -93,7 +93,9 @@ export interface ProfileField {
   path: string;
   label: string;
   unit?: string;
-  kind: 'gauge' | 'counter' | 'text';
+  kind: 'gauge' | 'counter' | 'state' | 'text';
+  chart?: boolean;
+  fleet?: boolean;
 }
 
 export interface ProfileDefinition {
@@ -111,8 +113,39 @@ export interface ProfileDefinition {
 export interface Profile {
   id: string;
   version: number;
+  organization_id?: string | null;
   definition: ProfileDefinition;
   created_at?: string;
+}
+
+export interface TelemetryAggregate {
+  kind: string;
+  label: string;
+  unit?: string;
+  count: number;
+  sum?: number;
+  min?: number;
+  max?: number;
+  average?: number;
+  delta?: number;
+  resets?: number;
+  delta_samples?: number;
+  last: unknown;
+}
+
+export interface TelemetryReportPoint {
+  device_id: string;
+  device_name: string;
+  source_id: string;
+  bucket: string;
+  fields: Record<string, TelemetryAggregate>;
+}
+
+export interface TelemetryReport {
+  from: string;
+  to: string;
+  bucket: 'hour' | 'day';
+  items: TelemetryReportPoint[];
 }
 
 export interface SessionItem {

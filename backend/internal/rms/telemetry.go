@@ -323,14 +323,20 @@ func (s *Core) Ingest(identity string, b []byte, now time.Time) error {
 
 func (s *Core) profiles(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	s.rows(w, `SELECT DISTINCT p.definition FROM profiles p WHERE $1='SUPER_ADMIN' OR EXISTS(SELECT 1 FROM assignments a JOIN devices d ON d.id=a.device_id WHERE a.profile_id=p.id AND a.version=p.version AND d.organization_id=$2)`, a.Role, a.Org)
+	s.rows(w, `SELECT row_to_json(t) FROM (SELECT p.id,p.version,p.organization_id,p.definition FROM profiles p WHERE $1='SUPER_ADMIN' OR p.organization_id IS NULL OR p.organization_id=$2 ORDER BY p.name,p.id,p.version) t`, a.Role, a.Org)
+}
+
+type profileCreateRequest struct {
+	Profile
+	OrganizationID string `json:"organization_id"`
 }
 
 func (s *Core) createProfile(w http.ResponseWriter, r *http.Request) {
-	var p Profile
-	if !body(w, r, &p) {
+	var req profileCreateRequest
+	if !body(w, r, &req) {
 		return
 	}
+	p := req.Profile
 	if p.ID == "" {
 		p.ID = randomID()
 	}
@@ -346,12 +352,27 @@ func (s *Core) createProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	e := s.mutateAudit("", actor(r).ID, "profile.create", p.ID, "INSERT INTO profiles VALUES($1,$2,$3,$4)", p.ID, p.Version, p.Name, string(raw(p)))
+	a := actor(r)
+	org := req.OrganizationID
+	if a.Role != "SUPER_ADMIN" {
+		org = a.Org
+	} else if org != "" && !validID(org) {
+		fail(w, 400, "valid organization required")
+		return
+	}
+	if org != "" {
+		var exists bool
+		if e := s.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM organizations WHERE id=$1)", org).Scan(&exists); e != nil || !exists {
+			fail(w, 400, "organization not found")
+			return
+		}
+	}
+	e := s.mutateAudit(org, a.ID, "profile.create", p.ID, "INSERT INTO profiles(id,version,name,definition,organization_id) VALUES($1,$2,$3,$4,$5)", p.ID, p.Version, p.Name, string(raw(p)), nullableString(org))
 	if e != nil {
 		fail(w, 409, "profile version already exists or save failed")
 		return
 	}
-	output(w, 201, p)
+	output(w, 201, map[string]any{"id": p.ID, "version": p.Version, "organization_id": org, "definition": p})
 }
 
 func (s *Core) assignProfile(w http.ResponseWriter, r *http.Request) {
@@ -374,30 +395,22 @@ func (s *Core) assignProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var b []byte
-	e = tx.QueryRow("SELECT definition FROM profiles WHERE id=$1 AND version=$2", req.ID, req.Version).Scan(&b)
+	var deviceOrg string
+	e = tx.QueryRow("SELECT organization_id FROM devices WHERE id=$1", id).Scan(&deviceOrg)
+	if e == nil {
+		e = tx.QueryRow(`SELECT p.definition FROM profiles p WHERE p.id=$1 AND p.version=$2 AND (p.organization_id IS NULL OR p.organization_id=$3 OR $4='SUPER_ADMIN')`, req.ID, req.Version, deviceOrg, actor(r).Role).Scan(&b)
+	}
 	if e != nil {
 		fail(w, 404, "profile not found")
 		return
 	}
 	var p Profile
 	json.Unmarshal(b, &p)
-	_, e = tx.Exec("SELECT id FROM devices WHERE id=$1 FOR UPDATE", id)
 	if e == nil {
-		_, e = tx.Exec("UPDATE assignments SET active=false WHERE device_id=$1 AND profile_id IN(SELECT id FROM profiles WHERE definition->>'source_id'=$2)", id, p.SourceID)
+		e = assignProfileTx(tx, id, req.ID, req.Version, p.SourceID)
 	}
 	if e == nil {
-		_, e = tx.Exec("INSERT INTO assignments VALUES($1,$2,$3,true) ON CONFLICT(device_id,profile_id,version) DO UPDATE SET active=true", id, req.ID, req.Version)
-	}
-	if e == nil {
-		var count int
-		e = tx.QueryRow("SELECT count(*) FROM assignments WHERE device_id=$1 AND active", id).Scan(&count)
-		if count > 16 {
-			fail(w, 400, "at most 16 active sources per device")
-			return
-		}
-	}
-	if e == nil {
-		e = audit(tx, "", actor(r).ID, "profile.assign", id)
+		e = audit(tx, deviceOrg, actor(r).ID, "profile.assign", id)
 	}
 	if e != nil || tx.Commit() != nil {
 		fail(w, 409, "assignment failed")
