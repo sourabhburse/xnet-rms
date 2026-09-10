@@ -291,7 +291,7 @@ func acceptsHTML(r *http.Request) bool {
 
 func (g *Gateway) tunnelPage(w http.ResponseWriter, r *http.Request, status int, eyebrow, title, message string, retry bool) {
 	if !acceptsHTML(r) {
-		fail(w, status, strings.ToLower(strings.ReplaceAll(title, " ", "_")))
+		fail(w, status, message)
 		return
 	}
 	primary := `<button class="action primary" type="button" onclick="location.reload()">Try again</button>`
