@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/gorilla/websocket"
+	"html"
 	"io"
 	"io/fs"
 	"log"
@@ -170,14 +171,14 @@ func tunnelOriginAllowed(publicURL, host, origin string, allowOpaque bool) bool 
 func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pair) {
 	if err := g.ensureLuciSSH(p); err != nil {
 		log.Printf("rms tunnel session %s LuCI SSH setup failed: %v", id, err)
-		fail(w, 502, "router SSH unavailable")
+		g.tunnelPage(w, r, 502, "ROUTER UNAVAILABLE", "Router connection lost", "The router did not accept the secure LuCI connection. Try starting a new session from the device details page.", false)
 		return
 	}
 	p.mu.Lock()
 	transport := p.sshTransport
 	p.mu.Unlock()
 	if transport == nil {
-		fail(w, 502, "LuCI transport unavailable")
+		g.tunnelPage(w, r, 502, "ROUTER UNAVAILABLE", "LuCI transport unavailable", "The secure router transport is no longer available. Start a new remote session and try again.", false)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
@@ -196,7 +197,7 @@ func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pai
 	resp, err := transport.RoundTrip(out)
 	if err != nil {
 		log.Printf("rms tunnel session %s LuCI request failed path=%s: %v", id, r.URL.Path, err)
-		fail(w, 502, "router LuCI unavailable")
+		g.tunnelPage(w, r, 502, "ROUTER UNAVAILABLE", "Router connection lost", "The router stopped responding to the LuCI request. Start a new session and try again.", false)
 		return
 	}
 	defer resp.Body.Close()
@@ -283,6 +284,43 @@ func (g *Gateway) close(id string, p *Pair) {
 	})
 }
 func (g *Gateway) Reconcile() error { return g.call("POST", "/internal/reconcile", nil, nil) }
+
+func acceptsHTML(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/html")
+}
+
+func (g *Gateway) tunnelPage(w http.ResponseWriter, r *http.Request, status int, eyebrow, title, message string, retry bool) {
+	if !acceptsHTML(r) {
+		fail(w, status, strings.ToLower(strings.ReplaceAll(title, " ", "_")))
+		return
+	}
+	primary := `<button class="action primary" type="button" onclick="location.reload()">Try again</button>`
+	if !retry {
+		primary = `<button class="action primary" type="button" onclick="window.close();this.textContent='You can close this tab'">Close tab</button>`
+	}
+	returnLink := ""
+	if g.Config.PublicURL != "" {
+		returnLink = fmt.Sprintf(`<a class="action" href="%s">Open XNET RMS</a>`, html.EscapeString(g.Config.PublicURL))
+	}
+	document := fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#203864"><title>%s · XNET RMS</title>
+<style>
+:root{color-scheme:light;--navy:#203864;--azure:#668bce;--bg:#f5f6f9;--ink:#191c23;--muted:#6d7482;--border:#e5e7ec}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 8%% 0%%,rgba(102,139,206,.16),transparent 31rem),var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.app{min-height:100vh}.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:64px;padding:0 28px;color:#fff;background:linear-gradient(135deg,#142747,var(--navy));box-shadow:0 8px 24px rgba(32,56,100,.14)}
+.brand{display:flex;align-items:center;gap:11px}.mark{position:relative;width:34px;height:24px}.mark i{position:absolute;top:5px;width:14px;height:14px;border-radius:99px;background:#fff}.mark i:nth-child(1){left:0;opacity:.88}.mark i:nth-child(2){left:9px;opacity:.72}.mark i:nth-child(3){left:18px;opacity:.5}.name{font-size:14px;font-weight:700}.caption{margin-top:2px;color:rgba(255,255,255,.62);font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.main{display:grid;place-items:center;width:min(760px,calc(100%% - 32px));min-height:calc(100vh - 64px);margin:0 auto;padding:32px 0}.card{width:100%%;overflow:hidden;border:1px solid var(--border);border-radius:14px;background:#fff;box-shadow:0 14px 40px rgba(25,28,35,.08)}.head{display:flex;align-items:flex-start;gap:14px;padding:24px;border-bottom:1px solid var(--border)}.icon{display:grid;flex:0 0 42px;width:42px;height:42px;place-items:center;border-radius:11px;color:#fff;background:var(--navy);font-family:ui-monospace,monospace;font-size:14px;font-weight:700}.eyebrow{margin:1px 0 7px;color:var(--azure);font-size:10px;font-weight:800;letter-spacing:.1em}.head h1{margin:0;font-size:20px;letter-spacing:-.02em}.head p{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.6}.body{padding:24px}.status{display:inline-flex;align-items:center;gap:7px;border:1px solid #f1c5cd;border-radius:99px;padding:5px 9px;color:#bb2d46;background:#fcecef;font-size:10px;font-weight:800;letter-spacing:.06em}.dot{width:7px;height:7px;border-radius:99px;background:#bb2d46}.detail{margin:18px 0 0;padding:13px 14px;border-radius:9px;background:#f5f6f9;color:var(--muted);font-size:12px;line-height:1.6}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}.action{display:inline-flex;align-items:center;justify-content:center;border:1px solid #d8dce5;border-radius:7px;padding:9px 13px;color:var(--navy);background:#fff;font:inherit;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer}.action:hover{background:#f2f4f7}.action.primary{border-color:var(--navy);color:#fff;background:var(--navy)}.action.primary:hover{background:#29477d}.foot{padding:0 24px 22px;color:var(--muted);font-size:10.5px}@media(max-width:640px){.topbar{padding:0 16px}.caption{display:none}.main{width:min(100%% - 20px,760px);padding:18px 0}.head,.body{padding:18px}.foot{padding:0 18px 18px}}
+</style></head>
+<body><div class="app"><header class="topbar"><div class="brand"><div class="mark" aria-hidden="true"><i></i><i></i><i></i></div><div><div class="name">XNET RMS</div><div class="caption">Secure remote access</div></div></div><span class="status"><span class="dot"></span>%s</span></header><main class="main"><section class="card"><div class="head"><div class="icon">&gt;_</div><div><div class="eyebrow">REMOTE SESSION</div><h1>%s</h1><p>%s</p></div></div><div class="body"><div class="detail">This page is served by XNET RMS because the router tunnel is not available for the current request. Your dashboard session and router login remain separate.</div><div class="actions">%s%s</div></div><div class="foot">For security, remote sessions expire automatically and cannot be resumed after they close.</div></section></main></div></body></html>`, html.EscapeString(title), html.EscapeString(eyebrow), html.EscapeString(title), html.EscapeString(message), primary, returnLink)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, document)
+}
+
 func (g *Gateway) Shutdown() {
 	g.mu.Lock()
 	pairs := map[string]*Pair{}
@@ -313,25 +351,25 @@ func (g *Gateway) Handler() http.Handler {
 		}
 		suffix := "." + g.Config.TunnelDomain
 		if !strings.HasSuffix(host, suffix) {
-			fail(w, 404, "session host required")
+			g.tunnelPage(w, r, 404, "INVALID ADDRESS", "Session host required", "Open this link from an active XNET RMS remote session.", false)
 			return
 		}
 		id := strings.TrimSuffix(host, suffix)
 		if !validID(id) {
-			fail(w, 404, "invalid session")
+			g.tunnelPage(w, r, 404, "INVALID SESSION", "Invalid remote session", "The session link is not valid. Start a new session from the XNET RMS device page.", false)
 			return
 		}
 		var session Session
 		if err := g.call("GET", "/internal/sessions/"+id, nil, &session); err != nil {
 			log.Printf("rms tunnel session %s inactive: %v path=%s", id, err, r.URL.Path)
-			fail(w, 403, "session inactive")
+			g.tunnelPage(w, r, 403, "SESSION ENDED", "Remote session unavailable", "This remote session has ended or expired. Start a new session from the XNET RMS device details page.", false)
 			return
 		}
 		log.Printf("rms tunnel session %s request path=%s protocol=%s", id, r.URL.Path, session.Protocol)
 		if r.URL.Path == "/launch" {
 			cookie := secret()
 			if g.call("POST", "/internal/sessions/"+id+"/claim", map[string]string{"ticket": r.URL.Query().Get("ticket"), "cookie": cookie}, nil) != nil {
-				fail(w, 403, "launch ticket invalid or used")
+				g.tunnelPage(w, r, 403, "LINK EXPIRED", "Launch link unavailable", "This one-time launch link has already been used or has expired. Start a new remote session.", false)
 				return
 			}
 			http.SetCookie(w, &http.Cookie{Name: "__Host-rms_session", Value: cookie, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: int(time.Until(session.ExpiresAt).Seconds())})
@@ -347,7 +385,7 @@ func (g *Gateway) Handler() http.Handler {
 		}
 		cookie, e := r.Cookie("__Host-rms_session")
 		if e != nil || session.BrowserHash == "" || subtle.ConstantTimeCompare([]byte(digest(cookie.Value)), []byte(session.BrowserHash)) != 1 {
-			fail(w, 403, "session login required")
+			g.tunnelPage(w, r, 403, "AUTHORIZATION REQUIRED", "Remote session not claimed", "Open the original launch link to authorize this browser session before loading the router interface.", false)
 			return
 		}
 		if origin := r.Header.Get("Origin"); origin != "" {
@@ -390,7 +428,7 @@ func (g *Gateway) Handler() http.Handler {
 		if session.Protocol == "SSH_LUCI" {
 			if p == nil {
 				w.Header().Set("Retry-After", "2")
-				fail(w, 503, "router connecting; retry shortly")
+				g.tunnelPage(w, r, 503, "CONNECTING", "Connecting to router", "The router is still establishing its secure tunnel. Try again in a moment.", true)
 				return
 			}
 			g.luci(w, r, id, p)
@@ -431,7 +469,7 @@ func (g *Gateway) Handler() http.Handler {
 		if p == nil {
 			log.Printf("rms tunnel session %s has no router pair path=%s", id, r.URL.Path)
 			w.Header().Set("Retry-After", "2")
-			fail(w, 503, "router connecting; retry shortly")
+			g.tunnelPage(w, r, 503, "CONNECTING", "Connecting to router", "The router is still establishing its secure tunnel. Try again in a moment.", true)
 			return
 		}
 		g.proxy(w, r, id, p)
@@ -864,7 +902,7 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 	if e != nil {
 		log.Printf("rms tunnel session %s router write failed: %v", id, e)
 		g.close(id, p)
-		fail(w, 502, "router unavailable")
+		g.tunnelPage(w, r, 502, "ROUTER UNAVAILABLE", "Router connection lost", "The secure tunnel closed before the router could receive this LuCI request.", false)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -888,15 +926,15 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 			}
 			p.httpLock.Unlock()
 		}(r.URL.Path)
-		fail(w, 504, "router timeout")
+		g.tunnelPage(w, r, 504, "ROUTER TIMEOUT", "Router request timed out", "The router did not respond in time. The tunnel is still available; try the request again.", true)
 	case <-p.done:
-		fail(w, 502, "session closed")
+		g.tunnelPage(w, r, 502, "SESSION ENDED", "Remote session ended", "The secure tunnel closed while LuCI was loading. Start a new session from the XNET RMS device details page.", false)
 	case data := <-p.responses:
 		var res HTTPFrame
 		if json.Unmarshal(data, &res) != nil || res.Status < 200 || res.Status > 599 {
 			log.Printf("rms tunnel session %s invalid router response path=%s", id, r.URL.Path)
 			g.close(id, p)
-			fail(w, 502, "invalid router response")
+			g.tunnelPage(w, r, 502, "INVALID RESPONSE", "Router response unavailable", "The router returned an invalid response for this LuCI request. Start a new session if the problem continues.", false)
 			return
 		}
 		for k, v := range res.Headers {

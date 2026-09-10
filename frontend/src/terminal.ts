@@ -9,31 +9,64 @@ const terminal = new Terminal({
   rows: 30,
   cursorBlink: true,
   theme: {
-    background: token("--card", "#ffffff"),
-    foreground: token("--foreground", "#191c23"),
+    background: "#0d1420",
+    foreground: "#e7edf9",
     cursor: token("--primary", "#2e5496"),
-    selectionBackground: token("--accent", "#e9eff8"),
-    black: token("--foreground", "#191c23"),
-    brightBlack: token("--muted-foreground", "#6d7482"),
+    selectionBackground: "#29466f",
+    black: "#0d1420",
+    brightBlack: "#8090a8",
     blue: token("--primary", "#2e5496"),
     brightBlue: token("--brand-azure", "#668bce"),
   },
 });
-terminal.open(document.getElementById("terminal")!);
+const terminalElement = document.getElementById("terminal")!;
+const stateElement = document.getElementById("terminal-state")!;
+const stateTitle = document.getElementById("terminal-state-title")!;
+const stateMessage = document.getElementById("terminal-state-message")!;
+const retryButton = document.getElementById("retry-connection") as HTMLButtonElement;
+const connectionBadge = document.getElementById("connection-badge")!;
+const connectionLabel = document.getElementById("connection-label")!;
+
+terminal.open(terminalElement);
 let socket: WebSocket | null = null;
 let opened = false;
 let closing = false;
 let attempts = 0;
 let retryTimer: number | undefined;
 
+const setConnectionState = (state: "connecting" | "connected" | "ended" | "error") => {
+  const labels = { connecting: "Connecting", connected: "Connected", ended: "Session ended", error: "Connection failed" };
+  connectionBadge.dataset.state = state;
+  connectionLabel.textContent = labels[state];
+};
+
+const showState = (kind: "ended" | "error") => {
+  setConnectionState(kind);
+  stateTitle.textContent = kind === "ended" ? "Terminal session ended" : "Unable to connect";
+  stateMessage.textContent = kind === "ended"
+    ? "The secure tunnel was closed or reached its watchdog timeout. Start a new terminal session from the device details page."
+    : "The router did not establish the secure tunnel. You can retry while the session is still available.";
+  retryButton.hidden = kind !== "error";
+  stateElement.hidden = false;
+};
+
+const closeWindow = () => {
+  window.close();
+  stateMessage.textContent = "This tab can now be closed.";
+};
+
 const connect = () => {
   if (closing) return;
+  opened = false;
+  setConnectionState("connecting");
+  stateElement.hidden = true;
   attempts += 1;
   socket = new WebSocket(`wss://${location.host}/ws`);
   socket.binaryType = "arraybuffer";
   socket.onopen = () => {
     opened = true;
     attempts = 0;
+    setConnectionState("connected");
     terminal.focus();
   };
   socket.onmessage = event => terminal.write(typeof event.data === "string" ? event.data : new Uint8Array(event.data));
@@ -46,7 +79,8 @@ const connect = () => {
       retryTimer = window.setTimeout(connect, 500);
       return;
     }
-    terminal.write(opened ? "\r\n[Session closed]\r\n" : "\r\n[Connection failed]\r\n");
+    if (opened) terminal.write("\r\n[Session closed]\r\n");
+    showState(opened ? "ended" : "error");
   };
   // Browsers commonly emit `error` immediately before `close`; render one
   // terminal status from `close` so a normal shutdown is not shown twice.
@@ -54,6 +88,13 @@ const connect = () => {
 };
 connect();
 terminal.onData(data => { if (socket && socket.readyState === WebSocket.OPEN) socket.send(data); });
+retryButton.addEventListener("click", () => {
+  attempts = 0;
+  connect();
+});
+document.getElementById("close-window")?.addEventListener("click", closeWindow);
+document.getElementById("state-close-window")?.addEventListener("click", closeWindow);
+
 const closeSession = () => {
   if (closing) return;
   closing = true;

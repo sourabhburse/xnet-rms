@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,6 +102,47 @@ func TestTunnelOriginAllowsAuthenticatedDashboardOrigin(t *testing.T) {
 	}
 	if tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "null", false) {
 		t.Fatal("opaque terminal origin should remain rejected")
+	}
+}
+
+func TestTunnelPageRendersHTMLForDocumentRequests(t *testing.T) {
+	g := &Gateway{Config: Config{PublicURL: "https://rms.example"}}
+	r := httptest.NewRequest(http.MethodGet, "https://session.rms.example/", nil)
+	r.Header.Set("Accept", "text/html,application/xhtml+xml")
+	w := httptest.NewRecorder()
+
+	g.tunnelPage(w, r, http.StatusBadGateway, "SESSION ENDED", "Remote session ended", "The secure tunnel closed while LuCI was loading.", false)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadGateway)
+	}
+	if got := w.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("content type = %q", got)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"XNET RMS", "Remote session ended", "The secure tunnel closed", "Open XNET RMS", "Close tab"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("HTML page does not contain %q", want)
+		}
+	}
+}
+
+func TestTunnelPageKeepsJSONForNonDocumentRequests(t *testing.T) {
+	g := &Gateway{}
+	r := httptest.NewRequest(http.MethodGet, "https://session.rms.example/ubus", nil)
+	r.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+
+	g.tunnelPage(w, r, http.StatusBadGateway, "SESSION ENDED", "Remote session ended", "The secure tunnel closed.", false)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadGateway)
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content type = %q, want application/json", got)
+	}
+	if strings.Contains(w.Body.String(), "<html") {
+		t.Fatal("non-document request received an HTML page")
 	}
 }
 

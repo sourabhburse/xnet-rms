@@ -3,10 +3,87 @@ body {
   min-height: 100vh;
   background: var(--background);
   color: var(--foreground);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-#terminal {
+.terminal-app {
   min-height: 100vh;
-  padding: 16px;
-  box-sizing: border-box;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(102, 139, 206, 0.12), transparent 30rem),
+    var(--background);
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 64px;
+  padding: 0 28px;
+  color: #fff;
+  background: linear-gradient(135deg, #142747, #203864);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08), 0 8px 24px rgba(32, 56, 100, 0.14);
+}
+
+.terminal-brand,
+.terminal-header-actions,
+.terminal-heading,
+.terminal-state-actions,
+.terminal-footer {
+  display: flex;
+  align-items: center;
+}
+
+.terminal-brand { gap: 11px; }
+.terminal-brand-mark { position: relative; display: flex; align-items: center; width: 34px; height: 24px; }
+.terminal-brand-mark span { position: absolute; width: 14px; height: 14px; border-radius: 999px; background: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.08); }
+.terminal-brand-mark span:nth-child(1) { left: 0; opacity: .88; }
+.terminal-brand-mark span:nth-child(2) { left: 9px; opacity: .72; }
+.terminal-brand-mark span:nth-child(3) { left: 18px; opacity: .5; }
+.terminal-brand-name { font-size: 14px; font-weight: 700; letter-spacing: .01em; }
+.terminal-brand-caption { margin-top: 2px; color: rgba(255,255,255,.62); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.terminal-header-actions { gap: 12px; }
+.connection-badge { display: inline-flex; align-items: center; gap: 7px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 5px 10px; color: rgba(255,255,255,.78); font-size: 11px; }
+.connection-dot { width: 7px; height: 7px; border-radius: 999px; background: #f0b45b; box-shadow: 0 0 0 3px rgba(240,180,91,.14); }
+.connection-badge[data-state="connected"] { color: #c4f5d4; border-color: rgba(132, 220, 158, .3); }
+.connection-badge[data-state="connected"] .connection-dot { background: #61d18a; box-shadow: 0 0 0 3px rgba(97,209,138,.16); }
+.connection-badge[data-state="ended"], .connection-badge[data-state="error"] { color: #ffd2d8; border-color: rgba(241, 151, 164, .3); }
+.connection-badge[data-state="ended"] .connection-dot, .connection-badge[data-state="error"] .connection-dot { background: #ee7888; box-shadow: 0 0 0 3px rgba(238,120,136,.16); }
+.terminal-close { cursor: pointer; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; padding: 7px 11px; color: #fff; background: transparent; font: inherit; font-size: 11px; }
+.terminal-close:hover { background: rgba(255,255,255,.1); }
+
+.terminal-main { width: min(1320px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 24px; }
+.terminal-card { overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: 0 12px 35px rgba(25, 28, 35, .08); }
+.terminal-card-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 18px 22px; border-bottom: 1px solid var(--border); }
+.terminal-heading { gap: 12px; }
+.terminal-heading-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 8px; color: #fff; background: var(--primary); font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; font-weight: 700; }
+.terminal-heading h1 { margin: 0; font-size: 15px; font-weight: 700; }
+.terminal-heading p { margin: 4px 0 0; color: var(--muted-foreground); font-size: 12px; }
+.terminal-session-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; color: var(--muted-foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; }
+.meta-label { color: var(--primary); font-size: 9px; font-weight: 700; letter-spacing: .1em; }
+.terminal-surface-wrap { position: relative; margin: 16px; min-height: min(68vh, 680px); border: 1px solid #28364f; border-radius: 8px; background: #0d1420; box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 5px 18px rgba(14, 27, 52, .15); }
+#terminal { min-height: min(68vh, 680px); padding: 18px; box-sizing: border-box; }
+#terminal .xterm-viewport { border-radius: 4px; }
+.terminal-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; box-sizing: border-box; text-align: center; color: #fff; background: rgba(13, 20, 32, .94); }
+.terminal-state[hidden] { display: none; }
+.terminal-state-icon { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid rgba(150, 178, 224, .32); border-radius: 14px; color: #b9cdf1; background: rgba(46, 84, 150, .28); font-family: var(--font-mono, ui-monospace, monospace); font-weight: 700; }
+.terminal-state h2 { margin: 16px 0 0; font-size: 17px; }
+.terminal-state p { max-width: 440px; margin: 8px 0 0; color: rgba(255,255,255,.62); font-size: 12px; line-height: 1.6; }
+.terminal-state-actions { gap: 8px; margin-top: 20px; }
+.terminal-action { cursor: pointer; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; padding: 8px 13px; color: #fff; background: rgba(255,255,255,.06); font: inherit; font-size: 11px; }
+.terminal-action:hover { background: rgba(255,255,255,.12); }
+.terminal-action.primary { border-color: #7ea7e5; background: #2e5496; }
+.terminal-action.primary:hover { background: #3b65aa; }
+.terminal-footer { justify-content: space-between; gap: 1rem; padding: 12px 4px 0; color: var(--muted-foreground); font-size: 10.5px; }
+kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 1px 4px; color: var(--foreground); background: var(--card); font-family: inherit; font-size: 10px; }
+
+@media (max-width: 640px) {
+  .terminal-header { padding: 0 16px; }
+  .terminal-brand-caption, .terminal-close { display: none; }
+  .terminal-main { width: min(100% - 20px, 1320px); padding-top: 18px; }
+  .terminal-card-header { align-items: flex-start; padding: 15px; }
+  .terminal-session-meta { display: none; }
+  .terminal-surface-wrap { margin: 10px; min-height: calc(100vh - 190px); }
+  #terminal { min-height: calc(100vh - 190px); padding: 10px; }
+  .terminal-footer { align-items: flex-start; flex-direction: column; padding: 9px 2px 0; }
 }
