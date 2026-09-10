@@ -358,6 +358,7 @@ export default function App() {
               <DeviceDetail
                 device={detailDevice}
                 user={user}
+                sessions={sessions}
                 onBack={() => goToView('devices')}
                 onRefreshDevice={refreshData}
               />

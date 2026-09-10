@@ -13,6 +13,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/devices" element={<App />} />
         <Route path="/devices/:serial" element={<App />} />
         <Route path="/sessions" element={<App />} />
+        <Route path="/reports" element={<App />} />
         <Route path="/admin/*" element={<App />} />
         <Route path="*" element={<Navigate to="/overview" replace />} />
       </Routes>

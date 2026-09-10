@@ -25,7 +25,7 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 
-import { Device, SnapshotField, SnapshotSource, User } from "../types";
+import { Device, SessionItem, SnapshotField, SnapshotSource, User } from "../types";
 import { api, formatApiError } from "../api";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +46,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 interface DeviceDetailProps {
   device: Device;
   user: User;
+  sessions: SessionItem[];
   onBack: () => void;
   onRefreshDevice: () => void;
 }
@@ -167,6 +168,7 @@ function MetricCard({
 export default function DeviceDetail({
   device,
   user,
+  sessions,
   onBack,
   onRefreshDevice,
 }: DeviceDetailProps) {
@@ -177,6 +179,7 @@ export default function DeviceDetail({
   const [historyData, setHistoryData] = useState<HistoryRow[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
+  const [closingSessionID, setClosingSessionID] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [sessionNotice, setSessionNotice] = useState<{
@@ -256,6 +259,10 @@ export default function DeviceDetail({
   }));
 
   const latestSources = snapshots.length ? snapshots : device.sources ?? [];
+  const activeDeviceSessions = useMemo(
+    () => sessions.filter((session) => session.device_id === device.id && !session.closed_at),
+    [sessions, device.id],
+  );
   const metrics = useMemo(() => ({
     rsrp: findMetric(latestSources, ["rsrp"]),
     sinr: findMetric(latestSources, ["sinr"]),
@@ -271,14 +278,18 @@ export default function DeviceDetail({
     registration: findMetric(latestSources, ["registration"]),
   }), [latestSources]);
 
-  const closeSession = async () => {
-    if (!sessionNotice?.sessionId) return;
+  const closeSession = async (sessionID = sessionNotice?.sessionId) => {
+    if (!sessionID) return;
+    setClosingSessionID(sessionID);
     try {
-      await api(`sessions/${sessionNotice.sessionId}`, "DELETE");
-      setSessionNotice(null);
+      await api(`sessions/${sessionID}`, "DELETE");
+      if (sessionNotice?.sessionId === sessionID) setSessionNotice(null);
       toast.success("Session closed");
+      void onRefreshDevice();
     } catch (err) {
       toast.error(formatApiError(err).message);
+    } finally {
+      setClosingSessionID(null);
     }
   };
 
@@ -340,7 +351,7 @@ export default function DeviceDetail({
         <p>{sessionNotice.message}</p>
         {sessionNotice.launchUrl && <div className="mt-2 flex flex-wrap gap-2">
           <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={() => window.open(sessionNotice.launchUrl, "_blank")}><ExternalLink className="size-3.5" />Open session tab</Button>
-          {sessionNotice.sessionId && <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={closeSession}><XCircle className="size-3.5" />Close session</Button>}
+          {sessionNotice.sessionId && <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={() => closeSession()}><XCircle className="size-3.5" />Close session</Button>}
         </div>}
       </Notice>}
 
@@ -418,7 +429,7 @@ export default function DeviceDetail({
         </TabsContent>
 
         <TabsContent value="sessions" className="mt-4">
-          <Card><CardHeader className="border-b border-border"><CardTitle>Remote sessions</CardTitle><CardDescription>Sessions opened from this device detail view.</CardDescription></CardHeader><CardContent className="p-4">{sessionNotice?.sessionId ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ok-border bg-ok-bg p-3"><div className="flex items-center gap-2 text-[12px] text-ok"><CheckCircle2 className="size-4" /><span>Session {sessionNotice.sessionId.slice(0, 12)}… is active.</span></div><Button variant="outline" size="sm" onClick={closeSession}><XCircle className="size-3.5" />Close session</Button></div> : <div className="flex flex-col items-center justify-center gap-2 py-8 text-center"><Code2 className="size-6 text-muted-foreground/60" /><p className="text-[13px] font-medium">No active session from this view</p><p className="max-w-[420px] text-xs text-muted-foreground">Start LuCI or a terminal session from the remote management card above.</p></div>}</CardContent></Card>
+          <Card><CardHeader className="border-b border-border"><CardTitle>Remote sessions</CardTitle><CardDescription>Active sessions currently connected to this device.</CardDescription></CardHeader><CardContent className="p-4">{activeDeviceSessions.length ? <div className="space-y-2">{activeDeviceSessions.map((session) => <div key={session.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ok-border bg-ok-bg p-3"><div className="flex min-w-0 items-center gap-2 text-[12px] text-ok"><CheckCircle2 className="size-4 shrink-0" /><div className="min-w-0"><div className="font-semibold">{session.protocol === "SSH_LUCI" ? "LuCI" : session.protocol === "TERMINAL_SSH" ? "Terminal SSH" : session.protocol} session active</div><div className="truncate font-mono text-[10.5px] opacity-80" title={session.id}>{session.id}</div><div className="text-[10.5px] opacity-80">Expires {session.expires_at ? new Date(session.expires_at).toLocaleString() : "—"}</div></div></div><Button variant="outline" size="sm" disabled={closingSessionID === session.id} onClick={() => closeSession(session.id)}><XCircle className="size-3.5" />{closingSessionID === session.id ? "Closing…" : "Close session"}</Button></div>)}</div> : sessionNotice?.sessionId ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ok-border bg-ok-bg p-3"><div className="flex items-center gap-2 text-[12px] text-ok"><CheckCircle2 className="size-4" /><span>Session {sessionNotice.sessionId.slice(0, 12)}… is active.</span></div><Button variant="outline" size="sm" disabled={closingSessionID === sessionNotice.sessionId} onClick={() => closeSession()}><XCircle className="size-3.5" />Close session</Button></div> : <div className="flex flex-col items-center justify-center gap-2 py-8 text-center"><Code2 className="size-6 text-muted-foreground/60" /><p className="text-[13px] font-medium">No active session</p><p className="max-w-[420px] text-xs text-muted-foreground">Start LuCI or a terminal session from the remote management card above.</p></div>}</CardContent></Card>
         </TabsContent>
       </Tabs>
 
