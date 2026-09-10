@@ -14,6 +14,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -83,7 +84,7 @@ func TestPostgresLifecycle(t *testing.T) {
 	}
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	csr, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, key)
-	enrollment := map[string]any{"serial_number": "XE33-test", "model": "XE33 2S", "firmware_version": "test", "enrollment_token": token, "csr": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr}))}
+	enrollment := map[string]any{"serial_number": "XE33-test", "model": "XE33 2S", "firmware_version": "test", "agent_version": "2.3.0", "enrollment_token": token, "csr": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr}))}
 	w := request("POST", "/api/v1/provision/check-in", "", enrollment)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
@@ -114,6 +115,9 @@ func TestPostgresLifecycle(t *testing.T) {
 	if w = request("POST", "/api/v1/profiles", viewer, map[string]any{}); w.Code != 403 {
 		t.Fatal("viewer changed profile", w.Code)
 	}
+	if w = request("POST", "/api/v1/profiles", admin, map[string]any{}); w.Code != 403 {
+		t.Fatal("organization admin reached raw collector API", w.Code)
+	}
 	if w = request("POST", "/api/v1/sessions", viewer, map[string]any{"device_id": id, "protocol": "HTTP_LUCI"}); w.Code != 403 {
 		t.Fatal("viewer remote access", w.Code)
 	}
@@ -135,9 +139,12 @@ func TestPostgresLifecycle(t *testing.T) {
 	must("INSERT INTO profiles(id,version,name,definition,organization_id) VALUES($1,1,'custom',$2,$3)", p.ID, string(raw(p)), org)
 	must("INSERT INTO assignments VALUES($1,$2,1,true)", id, p.ID)
 	acks := 0
+	var lastCommand map[string]any
 	core.Publish = func(topic string, v any) error {
 		if topic == "rms/v1/devices/"+id+"/acks" {
 			acks++
+		} else if topic == "rms/v1/devices/"+id+"/commands" {
+			lastCommand, _ = v.(map[string]any)
 		}
 		return nil
 	}
@@ -170,6 +177,144 @@ func TestPostgresLifecycle(t *testing.T) {
 			break
 		}
 	}
+
+	// Customer templates use only catalog IDs. A direct binding compiles the
+	// selected source into the existing profile contract and drives alerts.
+	templateBody := map[string]any{"name": "CPU health", "description": "integration", "definition": map[string]any{"catalog_version": 1, "interval_seconds": 60, "metrics": []any{map[string]any{"metric_id": "system.cpu_usage", "threshold": map[string]any{"warning": map[string]any{"operator": "gt", "value": 50}, "critical": map[string]any{"operator": "gt", "value": 90}}}}, "stale": map[string]any{"enabled": true, "severity": "warning", "missed_intervals": 2}}}
+	w = request("POST", "/api/v1/monitoring/templates", admin, templateBody)
+	if w.Code != 201 {
+		t.Fatal("template create", w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+	templateID := result["id"].(string)
+	w = request("POST", "/api/v1/monitoring/bindings", admin, map[string]any{"template_id": templateID, "target_type": "device", "target_id": id})
+	if w.Code != 201 {
+		t.Fatal("template bind", w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+	directBindingID := result["id"].(string)
+	var compiledID string
+	e = db.QueryRow(`SELECT p.id FROM profiles p JOIN assignments a ON a.profile_id=p.id AND a.version=p.version
+		WHERE a.device_id=$1 AND a.active AND p.definition->>'source_id'='device_overview' AND p.id<>$2`, id, DeviceOverviewProfileID).Scan(&compiledID)
+	if e != nil {
+		t.Fatal("compiled profile", e)
+	}
+	w = request("POST", "/api/v1/monitoring/previews", admin, map[string]any{"device_id": id, "metric_ids": []string{"system.cpu_usage"}})
+	if w.Code != 202 {
+		t.Fatal("preview dispatch", w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+	previewID := result["id"].(string)
+	if lastCommand["action"] != "preview_collect" {
+		t.Fatal("preview did not dispatch approved collector command", lastCommand)
+	}
+	core.acceptMonitoringPreview(id, raw(map[string]any{"request_id": previewID, "source_id": "device_overview", "observed_at": now, "status": "ok", "data": map[string]any{"cpu_usage_percent": 12.5}}))
+	w = request("GET", "/api/v1/monitoring/previews/"+previewID, admin, nil)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"complete"`) || !strings.Contains(w.Body.String(), `"available":true`) {
+		t.Fatal("preview result", w.Code, w.Body.String())
+	}
+	boot := randomID()
+	pushCPU := func(sequence int64, value float64) {
+		t.Helper()
+		x := Snapshot{Schema: 1, DeviceID: id, SourceID: "device_overview", ProfileID: compiledID, ProfileVersion: 1, BootID: boot, Sequence: sequence, ObservedAt: now.Add(time.Duration(sequence) * time.Minute), Status: "ok", Data: []byte(fmt.Sprintf(`{"cpu_usage_percent":%g}`, value))}
+		if e := core.Ingest(id, raw(x), x.ObservedAt); e != nil {
+			t.Fatal(e)
+		}
+	}
+	pushCPU(1, 60)
+	pushCPU(2, 60)
+	var alertID, alertStatus, alertSeverity string
+	if e = db.QueryRow("SELECT id,status,severity FROM alerts WHERE template_id=$1 AND status<>'RESOLVED'", templateID).Scan(&alertID, &alertStatus, &alertSeverity); e != nil || alertStatus != "OPEN" || alertSeverity != "warning" {
+		t.Fatal("warning debounce", alertID, alertStatus, alertSeverity, e)
+	}
+	if w = request("POST", "/api/v1/alerts/"+alertID+"/acknowledge", admin, map[string]any{}); w.Code != 200 {
+		t.Fatal("acknowledge", w.Code, w.Body.String())
+	}
+	pushCPU(3, 95)
+	pushCPU(4, 95)
+	if e = db.QueryRow("SELECT status,severity FROM alerts WHERE id=$1", alertID).Scan(&alertStatus, &alertSeverity); e != nil || alertStatus != "OPEN" || alertSeverity != "critical" {
+		t.Fatal("critical escalation", alertStatus, alertSeverity, e)
+	}
+	pushCPU(5, 10)
+	pushCPU(6, 10)
+	var reason string
+	if e = db.QueryRow("SELECT status,resolution_reason FROM alerts WHERE id=$1", alertID).Scan(&alertStatus, &reason); e != nil || alertStatus != "RESOLVED" || reason != "recovered" {
+		t.Fatal("automatic recovery", alertStatus, reason, e)
+	}
+	for {
+		ok, err := rollupOne(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			break
+		}
+	}
+	reportBody := map[string]any{"scope_type": "device", "scope_id": id, "template_id": templateID, "from": now.Add(-time.Hour).Format(time.RFC3339), "to": now.Add(24 * time.Hour).Format(time.RFC3339), "resolution": "hour", "page_size": 10}
+	if w = request("POST", "/api/v1/reports/telemetry/query", admin, reportBody); w.Code != 200 {
+		t.Fatal("report query", w.Code, w.Body.String())
+	}
+	if w = request("POST", "/api/v1/reports/telemetry/export.csv", admin, reportBody); w.Code != 200 || !strings.Contains(w.Body.String(), "cpu_usage_percent") {
+		t.Fatal("report CSV", w.Code, w.Body.String())
+	}
+
+	// Group/tag membership is dynamic, while overlapping source requests compile
+	// to one profile at the shortest effective interval.
+	w = request("POST", "/api/v1/groups", admin, map[string]any{"name": "Inherited monitoring", "description": "integration"})
+	if w.Code != 201 {
+		t.Fatal("group create", w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+	groupID := result["id"].(string)
+	if w = request("PUT", "/api/v1/groups/"+groupID+"/devices/"+id, admin, nil); w.Code != 204 {
+		t.Fatal("group membership", w.Code, w.Body.String())
+	}
+	inheritedBody := map[string]any{"name": "Inherited system", "description": "integration", "definition": map[string]any{"catalog_version": 1, "interval_seconds": 300, "metrics": []any{map[string]any{"metric_id": "system.memory_used"}}, "stale": map[string]any{"enabled": false}}}
+	w = request("POST", "/api/v1/monitoring/templates", admin, inheritedBody)
+	if w.Code != 201 {
+		t.Fatal("inherited template", w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+	inheritedTemplateID := result["id"].(string)
+	if w = request("POST", "/api/v1/monitoring/bindings", admin, map[string]any{"template_id": inheritedTemplateID, "target_type": "group", "target_id": groupID, "interval_seconds": 120}); w.Code != 201 {
+		t.Fatal("group binding", w.Code, w.Body.String())
+	}
+	var effectiveInterval int
+	if e = db.QueryRow(`SELECT (p.definition->>'interval_seconds')::integer FROM monitoring_effective_assignments m JOIN profiles p ON p.id=m.profile_id AND p.version=m.profile_version WHERE m.device_id=$1 AND m.source_id='device_overview'`, id).Scan(&effectiveInterval); e != nil || effectiveInterval != 60 {
+		t.Fatal("overlapping fastest interval", effectiveInterval, e)
+	}
+	if w = request("DELETE", "/api/v1/monitoring/bindings/"+directBindingID, admin, nil); w.Code != 204 {
+		t.Fatal("direct unassignment", w.Code, w.Body.String())
+	}
+	if e = db.QueryRow(`SELECT (p.definition->>'interval_seconds')::integer FROM monitoring_effective_assignments m JOIN profiles p ON p.id=m.profile_id AND p.version=m.profile_version WHERE m.device_id=$1 AND m.source_id='device_overview'`, id).Scan(&effectiveInterval); e != nil || effectiveInterval != 120 {
+		t.Fatal("group inherited interval", effectiveInterval, e)
+	}
+	if w = request("DELETE", "/api/v1/groups/"+groupID+"/devices/"+id, admin, nil); w.Code != 204 {
+		t.Fatal("group removal", w.Code, w.Body.String())
+	}
+	var effectiveCount int
+	db.QueryRow("SELECT count(*) FROM monitoring_effective_assignments WHERE device_id=$1", id).Scan(&effectiveCount)
+	if effectiveCount != 0 {
+		t.Fatal("group unassignment retained compiled source", effectiveCount)
+	}
+	w = request("POST", "/api/v1/tags", admin, map[string]any{"name": "tag-inheritance"})
+	if w.Code != 201 {
+		t.Fatal("tag create", w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+	tagID := result["id"].(string)
+	if w = request("PUT", "/api/v1/devices/"+id+"/tags/"+tagID, admin, nil); w.Code != 204 {
+		t.Fatal("tag membership", w.Code, w.Body.String())
+	}
+	if w = request("POST", "/api/v1/monitoring/bindings", admin, map[string]any{"template_id": inheritedTemplateID, "target_type": "tag", "target_id": tagID, "interval_seconds": 180}); w.Code != 201 {
+		t.Fatal("tag binding", w.Code, w.Body.String())
+	}
+	if e = db.QueryRow(`SELECT (p.definition->>'interval_seconds')::integer FROM monitoring_effective_assignments m JOIN profiles p ON p.id=m.profile_id AND p.version=m.profile_version WHERE m.device_id=$1 AND m.source_id='device_overview'`, id).Scan(&effectiveInterval); e != nil || effectiveInterval != 180 {
+		t.Fatal("tag inherited interval", effectiveInterval, e)
+	}
+	if w = request("DELETE", "/api/v1/devices/"+id+"/tags/"+tagID, admin, nil); w.Code != 204 {
+		t.Fatal("tag removal", w.Code, w.Body.String())
+	}
 	must("UPDATE devices SET last_seen=now() WHERE id=$1", id)
 	if w = request("GET", "/api/v1/devices", admin, nil); w.Code != 200 {
 		t.Fatal("fleet", w.Body.String())
@@ -180,12 +325,13 @@ func TestPostgresLifecycle(t *testing.T) {
 	if w = request("POST", "/api/v1/sessions", admin, map[string]any{"device_id": id, "protocol": "HTTP_LUCI"}); w.Code != 409 {
 		t.Fatal("busy", w.Code)
 	}
+	acksBeforeRevoke := acks
 	must("UPDATE devices SET revoked=true WHERE id=$1", id)
 	snap.Sequence = 3
 	if e = core.Ingest(id, raw(snap), now); e == nil {
 		t.Fatal("revoked telemetry accepted")
 	}
-	if acks != 3 {
+	if acks != acksBeforeRevoke {
 		t.Fatal("ack before successful commit", acks)
 	}
 	t.Log(fmt.Sprintf("schema %s: enrollment, identity, recovery replay, isolation, ingestion, late data, rollups and busy session passed", schema))

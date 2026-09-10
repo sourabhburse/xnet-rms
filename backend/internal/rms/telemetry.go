@@ -87,7 +87,7 @@ func (p Profile) Validate() error {
 			return errors.New("approved bundle required")
 		}
 	} else if p.Type == "builtin" {
-		if p.CollectorID != "device_overview" {
+		if p.CollectorID != "device_overview" && p.CollectorID != "ipsec" && p.CollectorID != "modbus_health" {
 			return errors.New("unsupported built-in collector")
 		}
 	} else {
@@ -303,6 +303,21 @@ func (s *Core) Ingest(identity string, b []byte, now time.Time) error {
 	}
 	n, _ := res.RowsAffected()
 	if n > 0 {
+		if x.SourceID == "device_overview" {
+			var previousBoot string
+			e = tx.QueryRow("SELECT boot_id FROM current_snapshots WHERE device_id=$1 AND source_id=$2", identity, x.SourceID).Scan(&previousBoot)
+			if e != nil && e != sql.ErrNoRows {
+				return e
+			}
+			if e == nil && previousBoot != x.BootID {
+				_, e = tx.Exec(`INSERT INTO presence_hours(device_id,hour,reboots) VALUES($1,date_trunc('hour',$2::timestamptz),1)
+					ON CONFLICT(device_id,hour) DO UPDATE SET reboots=presence_hours.reboots+1`, identity, x.ObservedAt)
+				if e != nil {
+					return e
+				}
+			}
+			e = nil
+		}
 		_, e = tx.Exec(`INSERT INTO snapshot_history VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, identity, x.SourceID, x.ProfileID, x.ProfileVersion, x.ObservedAt, now, x.Status, string(x.Data), string(fb))
 		if e != nil {
 			return e
@@ -312,6 +327,9 @@ func (s *Core) Ingest(identity string, b []byte, now time.Time) error {
 			return e
 		}
 		if e = markDirty(tx, x); e != nil {
+			return e
+		}
+		if e = s.evaluateThresholdsTx(tx, x, fields); e != nil {
 			return e
 		}
 	}

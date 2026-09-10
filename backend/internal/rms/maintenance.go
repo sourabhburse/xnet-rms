@@ -10,18 +10,20 @@ import (
 )
 
 type Aggregate struct {
-	Kind         string   `json:"kind"`
-	Label        string   `json:"label"`
-	Unit         string   `json:"unit,omitempty"`
-	Count        int      `json:"count"`
-	Sum          float64  `json:"sum,omitempty"`
-	Min          *float64 `json:"min,omitempty"`
-	Max          *float64 `json:"max,omitempty"`
-	Average      *float64 `json:"average,omitempty"`
-	Delta        float64  `json:"delta,omitempty"`
-	Resets       int      `json:"resets,omitempty"`
-	DeltaSamples int      `json:"delta_samples,omitempty"`
-	Last         any      `json:"last"`
+	Kind         string             `json:"kind"`
+	Label        string             `json:"label"`
+	Unit         string             `json:"unit,omitempty"`
+	Count        int                `json:"count"`
+	Sum          float64            `json:"sum,omitempty"`
+	Min          *float64           `json:"min,omitempty"`
+	Max          *float64           `json:"max,omitempty"`
+	Average      *float64           `json:"average,omitempty"`
+	Delta        float64            `json:"delta,omitempty"`
+	Resets       int                `json:"resets,omitempty"`
+	DeltaSamples int                `json:"delta_samples,omitempty"`
+	StateSeconds map[string]float64 `json:"state_seconds,omitempty"`
+	Distinct     []string           `json:"distinct,omitempty"`
+	Last         any                `json:"last"`
 }
 
 func Accumulate(a Aggregate, v Selected, previous *Selected) Aggregate {
@@ -53,6 +55,18 @@ func Accumulate(a Aggregate, v Selected, previous *Selected) Aggregate {
 					a.Delta += n
 				}
 			}
+		}
+	} else if v.Kind == "text" {
+		text := fmt.Sprint(v.Value)
+		found := false
+		for _, existing := range a.Distinct {
+			if existing == text {
+				found = true
+				break
+			}
+		}
+		if !found && len(a.Distinct) < 64 {
+			a.Distinct = append(a.Distinct, text)
 		}
 	}
 	return a
@@ -88,13 +102,24 @@ func rollupOne(d *sql.DB) (bool, error) {
 	} else if e != sql.ErrNoRows {
 		return false, e
 	}
-	rows, e := tx.Query("SELECT fields FROM snapshot_history WHERE device_id=$1 AND source_id=$2 AND observed_at>=$3 AND observed_at<$4 AND status='ok' ORDER BY observed_at,received_at", device, source, hour, hour.Add(time.Hour))
+	out := map[string]Aggregate{}
+	type observedFields struct {
+		at       time.Time
+		interval time.Duration
+		values   map[string]Selected
+	}
+	samples := []observedFields{}
+	rows, e := tx.Query(`SELECT h.observed_at,h.fields,coalesce((p.definition->>'interval_seconds')::integer,60)
+		FROM snapshot_history h LEFT JOIN profiles p ON p.id=h.profile_id AND p.version=h.profile_version
+		WHERE h.device_id=$1 AND h.source_id=$2 AND h.observed_at>=$3 AND h.observed_at<$4 AND h.status='ok'
+		ORDER BY h.observed_at,h.received_at`, device, source, hour, hour.Add(time.Hour))
 	if e != nil {
 		return false, e
 	}
-	out := map[string]Aggregate{}
 	for rows.Next() {
-		if e = rows.Scan(&b); e != nil {
+		var observed time.Time
+		var interval int
+		if e = rows.Scan(&observed, &b, &interval); e != nil {
 			rows.Close()
 			return false, e
 		}
@@ -103,19 +128,43 @@ func rollupOne(d *sql.DB) (bool, error) {
 			rows.Close()
 			return false, e
 		}
-		for key, v := range values {
-			var prev *Selected
-			if p, ok := previous[key]; ok {
-				prev = &p
-			}
-			out[key] = Accumulate(out[key], v, prev)
+		if interval < 60 || interval > 300 {
+			interval = 60
 		}
-		previous = values
+		samples = append(samples, observedFields{at: observed, interval: time.Duration(interval) * time.Second, values: values})
 	}
 	e = rows.Err()
 	rows.Close()
 	if e != nil {
 		return false, e
+	}
+	for i, sample := range samples {
+		for key, v := range sample.values {
+			var prev *Selected
+			if p, ok := previous[key]; ok {
+				prev = &p
+			}
+			aggregate := Accumulate(out[key], v, prev)
+			if v.Kind == "state" {
+				until := sample.at.Add(sample.interval)
+				if until.After(hour.Add(time.Hour)) {
+					until = hour.Add(time.Hour)
+				}
+				if i+1 < len(samples) && samples[i+1].at.Before(until) {
+					until = samples[i+1].at
+				}
+				seconds := until.Sub(sample.at).Seconds()
+				if seconds < 0 {
+					seconds = 0
+				}
+				if aggregate.StateSeconds == nil {
+					aggregate.StateSeconds = map[string]float64{}
+				}
+				aggregate.StateSeconds[fmt.Sprint(v.Value)] += seconds
+			}
+			out[key] = aggregate
+		}
+		previous = sample.values
 	}
 	_, e = tx.Exec("INSERT INTO hourly_summaries VALUES($1,$2,$3,$4) ON CONFLICT(device_id,source_id,hour) DO UPDATE SET fields=EXCLUDED.fields", device, source, hour, string(raw(out)))
 	if e == nil {
@@ -129,7 +178,7 @@ func rollupOne(d *sql.DB) (bool, error) {
 func (s *Core) Maintain(ctx context.Context) {
 	tick := time.NewTicker(10 * time.Second)
 	defer tick.Stop()
-	last := time.Time{}
+	last, lastStale := time.Time{}, time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -148,6 +197,12 @@ func (s *Core) Maintain(ctx context.Context) {
 			s.DB.Exec("DELETE FROM recovery_challenges WHERE expires_at<now()")
 			if e := s.expireSessions(); e != nil {
 				log.Printf("session expiry: %v", e)
+			}
+			if now.Sub(lastStale) >= time.Minute {
+				if e := s.evaluateStaleAlerts(now.UTC()); e != nil {
+					log.Printf("stale alert evaluation: %v", e)
+				}
+				lastStale = now
 			}
 			if now.Sub(last) >= time.Hour {
 				if e := Partitions(s.DB, now); e != nil {
@@ -192,6 +247,14 @@ func (s *Core) expire(now time.Time) error {
 			}
 		}
 	}
-	_, e = s.DB.Exec("DELETE FROM hourly_summaries WHERE hour<$1", now.AddDate(0, 0, -s.Config.SummaryDays))
+	cutoffSummary := now.AddDate(0, 0, -s.Config.SummaryDays)
+	if _, e = s.DB.Exec("DELETE FROM hourly_summaries WHERE hour<$1", cutoffSummary); e != nil {
+		return e
+	}
+	if _, e = s.DB.Exec("DELETE FROM presence_hours WHERE hour<$1", cutoffSummary); e != nil {
+		return e
+	}
+	_, e = s.DB.Exec(`DELETE FROM alert_events e USING alerts a
+		WHERE e.alert_id=a.id AND e.occurred_at<$1 AND a.status='RESOLVED'`, cutoffSummary)
 	return e
 }

@@ -52,6 +52,10 @@ export function parseAppRoute(pathname: string, search: string): AppRoute {
     return { view: "reports", deviceSerial: null };
   }
 
+  if (path === "/alerts") {
+    return { view: "alerts", deviceSerial: null };
+  }
+
   if (path.startsWith("/admin/")) {
     const section = path.slice("/admin/".length);
     return {
@@ -81,6 +85,8 @@ export function routeForView(view: string): string {
       return "/sessions";
     case "reports":
       return "/reports";
+    case "alerts":
+      return "/alerts";
     case "users":
     case "enrollment-tokens":
     case "profiles":

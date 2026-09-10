@@ -267,6 +267,9 @@ func activatePending(tx *sql.Tx, pending, org, name string, tags []byte, user st
 		e = assignDefaultTelemetry(tx, id)
 	}
 	if e == nil {
+		e = reconcileDeviceTx(tx, id, org)
+	}
+	if e == nil {
 		e = audit(tx, org, user, "device.claim", id)
 	}
 	return id, e

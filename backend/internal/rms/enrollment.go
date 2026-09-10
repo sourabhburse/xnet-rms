@@ -15,6 +15,7 @@ func (s *Core) enroll(w http.ResponseWriter, r *http.Request) {
 		Serial   string `json:"serial_number"`
 		Model    string `json:"model"`
 		Firmware string `json:"firmware_version"`
+		Agent    string `json:"agent_version,omitempty"`
 		Token    string `json:"enrollment_token"`
 		CSR      string `json:"csr"`
 	}
@@ -22,7 +23,7 @@ func (s *Core) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	csr, e := parseCSR(req.CSR)
-	if e != nil || len(req.Serial) == 0 || len(req.Serial) > 128 || len(req.Model) > 128 || len(req.Firmware) > 128 {
+	if e != nil || len(req.Serial) == 0 || len(req.Serial) > 128 || len(req.Model) > 128 || len(req.Firmware) > 128 || len(req.Agent) > 32 {
 		fail(w, 400, "valid identity and P-256 CSR required")
 		return
 	}
@@ -68,13 +69,15 @@ func (s *Core) enroll(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id = randomID()
-		_, e = tx.Exec("INSERT INTO devices(id,organization_id,serial_number,model,firmware_version,public_key) VALUES($1,$2,$3,$4,$5,$6)", id, org, req.Serial, req.Model, req.Firmware, pub)
+		_, e = tx.Exec("INSERT INTO devices(id,organization_id,serial_number,model,firmware_version,agent_version,public_key) VALUES($1,$2,$3,$4,$5,$6,$7)", id, org, req.Serial, req.Model, req.Firmware, req.Agent, pub)
 		if e == nil {
 			_, e = tx.Exec("UPDATE enrollment_tokens SET used_count=used_count+1 WHERE id=$1", tokenID)
 		}
 	} else if e == nil && (revoked || oldOrg != org || !bytes.Equal(pub, oldPub)) {
 		fail(w, 409, "identity already registered; use certificate recovery")
 		return
+	} else if e == nil {
+		_, e = tx.Exec("UPDATE devices SET model=$2,firmware_version=$3,agent_version=coalesce(nullif($4,''),agent_version) WHERE id=$1", id, req.Model, req.Firmware, req.Agent)
 	}
 	if e != nil {
 		fail(w, 409, "enrollment conflict")

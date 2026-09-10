@@ -48,6 +48,8 @@ export interface Device {
   revoked: boolean;
   last_seen: string;
   status: DeviceStatus;
+  health?: 'healthy' | 'warning' | 'critical';
+  active_alerts?: number;
   sources?: SnapshotSource[];
 }
 
@@ -86,6 +88,8 @@ export interface DeviceGroup {
   description: string;
   created_at?: string;
   device_count: number;
+  health?: 'healthy' | 'warning' | 'critical';
+  active_alerts?: number;
 }
 
 export interface ProfileField {
@@ -130,6 +134,8 @@ export interface TelemetryAggregate {
   delta?: number;
   resets?: number;
   delta_samples?: number;
+  state_seconds?: Record<string, number>;
+  distinct?: string[];
   last: unknown;
 }
 
@@ -144,8 +150,101 @@ export interface TelemetryReportPoint {
 export interface TelemetryReport {
   from: string;
   to: string;
-  bucket: 'hour' | 'day';
+  bucket?: 'hour' | 'day';
+  resolution?: 'hour' | 'day';
   items: TelemetryReportPoint[];
+  next_cursor?: string;
+  alerts?: {
+    count: number;
+    warning_count: number;
+    critical_count: number;
+    warning_seconds: number;
+    critical_seconds: number;
+    first_breach?: string | null;
+    last_breach?: string | null;
+    current_state: 'healthy' | 'warning' | 'critical';
+  };
+}
+
+export interface CatalogMetric {
+  id: string;
+  category: string;
+  description: string;
+  source_id: string;
+  required_capability?: string;
+  field: ProfileField;
+}
+
+export interface MonitoringCatalog {
+  version: number;
+  categories: string[];
+  metrics: CatalogMetric[];
+}
+
+export interface ThresholdCondition {
+  operator: 'gt' | 'gte' | 'lt' | 'lte' | 'outside';
+  value?: number;
+  minimum?: number;
+  maximum?: number;
+}
+
+export interface MonitoringMetricSelection {
+  metric_id: string;
+  label?: string;
+  description?: string;
+  threshold?: {
+    warning?: ThresholdCondition;
+    critical?: ThresholdCondition;
+    states?: Record<string, 'healthy' | 'warning' | 'critical'>;
+  };
+}
+
+export interface MonitoringTemplateDefinition {
+  catalog_version: number;
+  interval_seconds: number;
+  metrics: MonitoringMetricSelection[];
+  stale: { enabled: boolean; severity?: 'warning' | 'critical'; missed_intervals?: number };
+}
+
+export interface MonitoringTemplate {
+  id: string;
+  organization_id: string;
+  name: string;
+  description: string;
+  version: number;
+  definition: MonitoringTemplateDefinition;
+}
+
+export interface MonitoringBinding {
+  id: string;
+  organization_id: string;
+  template_id: string;
+  template_name: string;
+  template_version: number;
+  target_type: 'device' | 'group' | 'tag';
+  target_id: string;
+  interval_seconds?: number;
+  enabled: boolean;
+}
+
+export interface AlertItem {
+  id: string;
+  organization_id: string;
+  device_id: string;
+  device_name: string;
+  template_id: string;
+  template_name: string;
+  template_version: number;
+  metric_id: string;
+  entity_key: string;
+  severity: 'warning' | 'critical';
+  status: 'PENDING' | 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
+  last_value: unknown;
+  opened_at?: string;
+  acknowledged_at?: string;
+  resolved_at?: string;
+  resolution_reason?: string;
+  updated_at: string;
 }
 
 export interface SessionItem {

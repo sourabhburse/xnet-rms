@@ -329,12 +329,10 @@ export default function DeviceList({
       {
         id: "status",
         header: "Status",
-        cell: ({ row }) => (
-          <Badge variant={statusVariant(row.original.status)}>
-            <span className="size-1.5 rounded-full bg-current" />
-            {statusLabel(row.original.status)}
-          </Badge>
-        ),
+        cell: ({ row }) => <div className="flex flex-col items-start gap-1">
+          <Badge variant={statusVariant(row.original.status)}><span className="size-1.5 rounded-full bg-current" />{statusLabel(row.original.status)}</Badge>
+          {row.original.health && row.original.health !== "healthy" && <Badge variant={row.original.health === "critical" ? "down" : "secondary"}>{row.original.health} · {row.original.active_alerts || 0}</Badge>}
+        </div>,
       },
       {
         id: "last_seen",

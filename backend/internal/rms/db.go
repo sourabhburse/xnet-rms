@@ -41,7 +41,7 @@ func Migrate(d *sql.DB) error {
 	if _, e = tx.Exec("CREATE TABLE IF NOT EXISTS rms_migrations(version integer PRIMARY KEY)"); e != nil {
 		return e
 	}
-	for version, name := range []string{"001_initial.sql", "002_bundles.sql", "003_audit.sql", "004_onboarding.sql", "005_ssh_luci.sql", "006_groups.sql", "007_device_overview.sql", "008_profile_ownership.sql"} {
+	for version, name := range []string{"001_initial.sql", "002_bundles.sql", "003_audit.sql", "004_onboarding.sql", "005_ssh_luci.sql", "006_groups.sql", "007_device_overview.sql", "008_profile_ownership.sql", "009_monitoring_alerts.sql"} {
 		var n int
 		if e = tx.QueryRow("SELECT count(*) FROM rms_migrations WHERE version=$1", version+1).Scan(&n); e != nil {
 			return e
@@ -63,7 +63,7 @@ func Migrate(d *sql.DB) error {
 }
 func CheckSchema(d *sql.DB) error {
 	var n int
-	e := d.QueryRow("SELECT count(*) FROM rms_migrations WHERE version=8").Scan(&n)
+	e := d.QueryRow("SELECT count(*) FROM rms_migrations WHERE version=9").Scan(&n)
 	if e != nil || n != 1 {
 		return fmt.Errorf("run explicit migrate command before serving: %v", e)
 	}

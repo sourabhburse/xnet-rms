@@ -11,6 +11,7 @@ import {
   Building2,
   TerminalSquare,
   FileBarChart,
+  BellRing,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ import { BrandMark } from "./BrandMark";
 export interface SidebarCounts {
   devices: number;
   sessions: number;
+  alerts?: number;
 }
 
 interface NavEntry {
@@ -81,7 +83,10 @@ export function AppSidebar({
 
   sections.push({
     heading: "Monitoring",
-    items: [{ key: "reports", label: "Telemetry reports", icon: FileBarChart }],
+    items: [
+      { key: "alerts", label: "Alerts", icon: BellRing, count: counts.alerts || undefined },
+      { key: "reports", label: "Telemetry reports", icon: FileBarChart },
+    ],
   });
 
   if (isOrgAdmin) {

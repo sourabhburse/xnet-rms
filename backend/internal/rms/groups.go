@@ -24,7 +24,11 @@ func (s *Core) groups(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid organization")
 		return
 	}
-	s.rows(w, `SELECT row_to_json(t) FROM (SELECT g.id,g.organization_id,g.name,g.description,g.created_at,count(m.device_id)::integer AS device_count FROM device_groups g LEFT JOIN device_group_members m ON m.group_id=g.id WHERE $1='' OR g.organization_id=$1 GROUP BY g.id ORDER BY g.name) t`, org)
+	s.rows(w, `SELECT row_to_json(t) FROM (SELECT g.id,g.organization_id,g.name,g.description,g.created_at,count(m.device_id)::integer AS device_count,
+		coalesce((SELECT count(*) FROM alerts a JOIN device_group_members am ON am.device_id=a.device_id WHERE am.group_id=g.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED')),0) AS active_alerts,
+		CASE WHEN EXISTS(SELECT 1 FROM alerts a JOIN device_group_members am ON am.device_id=a.device_id WHERE am.group_id=g.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED') AND a.severity='critical') THEN 'critical'
+		WHEN EXISTS(SELECT 1 FROM alerts a JOIN device_group_members am ON am.device_id=a.device_id WHERE am.group_id=g.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED')) THEN 'warning' ELSE 'healthy' END AS health
+		FROM device_groups g LEFT JOIN device_group_members m ON m.group_id=g.id WHERE $1='' OR g.organization_id=$1 GROUP BY g.id ORDER BY g.name) t`, org)
 }
 
 func (s *Core) createGroup(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +97,16 @@ func (s *Core) deleteGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var org string
-	e = tx.QueryRow("DELETE FROM device_groups WHERE id=$1 AND ($2='SUPER_ADMIN' OR organization_id=$3) RETURNING organization_id", r.PathValue("id"), a.Role, a.Org).Scan(&org)
+	e = tx.QueryRow("SELECT organization_id FROM device_groups WHERE id=$1 AND ($2='SUPER_ADMIN' OR organization_id=$3) FOR UPDATE", r.PathValue("id"), a.Role, a.Org).Scan(&org)
+	if e == nil {
+		_, e = tx.Exec("DELETE FROM monitoring_bindings WHERE target_type='group' AND target_id=$1", r.PathValue("id"))
+	}
+	if e == nil {
+		_, e = tx.Exec("DELETE FROM device_groups WHERE id=$1", r.PathValue("id"))
+	}
+	if e == nil {
+		e = reconcileOrganizationTx(tx, org)
+	}
 	if e == nil {
 		e = audit(tx, org, a.ID, "group.delete", r.PathValue("id"))
 	}
@@ -129,6 +142,9 @@ func (s *Core) groupDevice(w http.ResponseWriter, r *http.Request) {
 		_, e = tx.Exec("INSERT INTO device_group_members(group_id,device_id) VALUES($1,$2) ON CONFLICT DO NOTHING", groupID, deviceID)
 	} else {
 		_, e = tx.Exec("DELETE FROM device_group_members WHERE group_id=$1 AND device_id=$2", groupID, deviceID)
+	}
+	if e == nil {
+		e = reconcileDeviceTx(tx, deviceID, org)
 	}
 	if e == nil {
 		e = audit(tx, org, a.ID, map[bool]string{true: "group.device.add", false: "group.device.remove"}[r.Method == http.MethodPut], deviceID)

@@ -16,6 +16,8 @@
 #define PROFILE_FILE "/tmp/xnet-rms-profiles.json"
 #define COLLECTOR_DIR RMS_PKI_DIR "/collectors"
 #define BUILTIN_DEVICE_OVERVIEW "/usr/libexec/xnet-rms/device-overview.sh"
+#define BUILTIN_IPSEC "/usr/libexec/xnet-rms/ipsec.lua"
+#define BUILTIN_MODBUS_HEALTH "/usr/libexec/xnet-rms/modbus-health.sh"
 
 static JSON_Value *profiles;
 static time_t loaded;
@@ -27,6 +29,9 @@ static char buffer[32769];
 static size_t used, limit;
 static char observed[32];
 static int overflow;
+static char preview_request[64], preview_sources[4][33], preview_source[33];
+static size_t preview_count, preview_next;
+static int preview_running;
 
 static long seconds(void) {
     struct timespec t;
@@ -79,8 +84,42 @@ static JSON_Value *normalize_ubus_message(JSON_Value *data) {
     return wrapped;
 }
 
-static int builtin_collector(const char *id) {
-    return id && !strcmp(id, "device_overview");
+static const char *builtin_collector_path(const char *id) {
+    if (!id) return NULL;
+    if (!strcmp(id, "device_overview")) return BUILTIN_DEVICE_OVERVIEW;
+    if (!strcmp(id, "ipsec")) return BUILTIN_IPSEC;
+    if (!strcmp(id, "modbus_health")) return BUILTIN_MODBUS_HEALTH;
+    return NULL;
+}
+
+int rms_preview_collect(const char *request_id, JSON_Array *collector_ids) {
+    size_t count = json_array_get_count(collector_ids);
+    if (!rms_id(request_id) || count < 1 || count > 4 || preview_request[0]) return -1;
+    for (size_t i = 0; i < count; i++) {
+        const char *id = json_array_get_string(collector_ids, i);
+        if (!rms_id(id) || !builtin_collector_path(id)) return -1;
+        snprintf(preview_sources[i], sizeof(preview_sources[i]), "%s", id);
+    }
+    snprintf(preview_request, sizeof(preview_request), "%s", request_id);
+    preview_count = count;
+    preview_next = 0;
+    return 0;
+}
+
+/* Defence in depth: even platform-authored profiles may call only known
+ * read-only ubus methods. Customer templates never contain raw ubus calls. */
+static int readonly_ubus(const char *object, const char *method) {
+    if (!object || !method) return 0;
+    if ((!strcmp(object, "system") && (!strcmp(method, "info") || !strcmp(method, "board"))) ||
+        (!strcmp(object, "cellular") && !strcmp(method, "status")) ||
+        (!strcmp(object, "ipsec-status") && (!strcmp(method, "status") || !strcmp(method, "statusall"))) ||
+        (!strcmp(object, "mwan3") && !strcmp(method, "status")) ||
+        (!strcmp(object, "network.device") && !strcmp(method, "status")) ||
+        (!strcmp(object, "service") && !strcmp(method, "list")) ||
+        (!strcmp(object, "dhcp") && (!strcmp(method, "ipv4leases") || !strcmp(method, "ipv6leases"))) ||
+        (!strcmp(object, "dnsmasq") && !strcmp(method, "metrics")) ||
+        (!strcmp(object, "iwinfo") && (!strcmp(method, "info") || !strcmp(method, "assoclist")))) return 1;
+    return !strncmp(object, "network.interface.", 18) && strlen(object) <= 96 && !strcmp(method, "status");
 }
 
 static int verify_bundle(JSON_Object *b, const char *id, int version) {
@@ -175,8 +214,9 @@ int rms_sync_profiles(void) {
             snprintf(target, sizeof(target), "%d.sh", version);
             unlink(link);
             if (symlink(target, link) || rename(link, current)) goto done;
-        } else if (strcmp(type, "ubus") &&
-                   (strcmp(type, "builtin") || !builtin_collector(json_object_get_string(p, "collector_id")))) {
+        } else if (!strcmp(type, "ubus")) {
+            if (!readonly_ubus(json_object_get_string(p, "object"), json_object_get_string(p, "method"))) goto done;
+        } else if (strcmp(type, "builtin") || !builtin_collector_path(json_object_get_string(p, "collector_id"))) {
             goto done;
         }
     }
@@ -226,6 +266,34 @@ static void emit(int status) {
         telemetry_queue_push(topic, payload, strlen(payload), g_cfg.boot_id, source, seq);
         free(payload);
     }
+}
+
+static void emit_preview(int status) {
+    buffer[used] = 0;
+    JSON_Value *data = complete_json(buffer) ? json_parse_string(buffer) : NULL;
+    const char *state = "ok", *error = "";
+    if (overflow || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || !data) {
+        state = WIFEXITED(status) && WEXITSTATUS(status) == 2 ? "unsupported" : "error";
+        error = overflow ? "collector timeout or output limit exceeded" : "collector failed or produced invalid JSON";
+        json_value_free(data);
+        data = json_value_init_object();
+    }
+    JSON_Value *v = json_value_init_object();
+    JSON_Object *o = json_value_get_object(v);
+    json_object_set_string(o, "request_id", preview_request);
+    json_object_set_string(o, "source_id", preview_source);
+    json_object_set_string(o, "observed_at", observed);
+    json_object_set_string(o, "status", state);
+    json_object_set_string(o, "error", error);
+    json_object_set_value(o, "data", data);
+    char *payload = json_serialize_to_string(v);
+    if (payload && g_mosq) {
+        char topic[128];
+        snprintf(topic, sizeof(topic), "rms/v1/devices/%s/previews", g_cfg.device_id);
+        mosquitto_publish(g_mosq, NULL, topic, strlen(payload), payload, 1, false);
+    }
+    free(payload);
+    json_value_free(v);
 }
 
 void rms_collect_stop(void) {
@@ -280,7 +348,14 @@ void rms_collect_tick(void) {
             close(pipefd);
             pipefd = -1;
             child = 0;
-            emit(status);
+            if (preview_running) {
+                emit_preview(status);
+                preview_running = 0;
+                preview_next++;
+                if (preview_next >= preview_count) preview_request[0] = 0;
+            } else {
+                emit(status);
+            }
         }
         return;
     }
@@ -296,6 +371,43 @@ void rms_collect_tick(void) {
         } else {
             json_value_free(v);
         }
+    }
+    if (preview_request[0] && preview_next < preview_count) {
+        const char *path = builtin_collector_path(preview_sources[preview_next]);
+        int fds[2];
+        if (!path || pipe(fds)) return;
+        child = fork();
+        if (child < 0) {
+            close(fds[0]);
+            close(fds[1]);
+            child = 0;
+            return;
+        }
+        if (child == 0) {
+            setpgid(0, 0);
+            dup2(fds[1], 1);
+            int null = open("/dev/null", O_RDWR);
+            if (null >= 0) {
+                dup2(null, 0);
+                dup2(null, 2);
+            }
+            for (int fd = 3; fd < 1024; fd++) close(fd);
+            execl(path, path, (char *)NULL);
+            _exit(127);
+        }
+        setpgid(child, child);
+        close(fds[1]);
+        pipefd = fds[0];
+        fcntl(pipefd, F_SETFL, O_NONBLOCK);
+        used = 0;
+        overflow = 0;
+        limit = 32768;
+        deadline = now + 10;
+        preview_running = 1;
+        snprintf(preview_source, sizeof(preview_source), "%s", preview_sources[preview_next]);
+        time_t wall = time(NULL);
+        strftime(observed, sizeof(observed), "%Y-%m-%dT%H:%M:%SZ", gmtime(&wall));
+        return;
     }
     if (!profiles || !g_cfg.provisioned || time(NULL) < 1577836800) return;
     JSON_Array *a = json_object_get_array(json_value_get_object(profiles), "profiles");
@@ -333,7 +445,7 @@ void rms_collect_tick(void) {
                 const char *method = json_object_get_string(p, "method");
                 JSON_Value *args = json_object_get_value(p, "args");
                 char *arg = args ? json_serialize_to_string(args) : strdup("{}");
-                if (obj && method) execl("/bin/ubus", "ubus", "call", obj, method, arg, (char *)NULL);
+                if (readonly_ubus(obj, method)) execl("/bin/ubus", "ubus", "call", obj, method, arg, (char *)NULL);
             } else if (type && !strcmp(type, "script")) {
                 const char *id = json_object_get_string(p, "bundle_id");
                 int version = json_object_get_number(p, "bundle_version");
@@ -344,7 +456,8 @@ void rms_collect_tick(void) {
                 }
             } else if (type && !strcmp(type, "builtin")) {
                 const char *id = json_object_get_string(p, "collector_id");
-                if (builtin_collector(id)) execl(BUILTIN_DEVICE_OVERVIEW, BUILTIN_DEVICE_OVERVIEW, (char *)NULL);
+                const char *path = builtin_collector_path(id);
+                if (path) execl(path, path, (char *)NULL);
             }
             _exit(127);
         }

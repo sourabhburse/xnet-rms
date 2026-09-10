@@ -10,7 +10,7 @@
 #include <time.h>
 #include "parson.h"
 
-#define AGENT_VERSION "2.2.0"
+#define AGENT_VERSION "2.3.0"
 #define DEFAULT_SERVER ""
 #define DEFAULT_MQTT_HOST ""
 #define DEFAULT_MQTT_PORT 8883
@@ -79,6 +79,7 @@ int init_mqtt(void);
 void send_heartbeat(struct uloop_timeout *t);
 void collect_and_send_telemetry(struct uloop_timeout *t);
 void handle_telemetry_ack(const char *payload);
+int rms_preview_collect(const char *request_id, JSON_Array *collector_ids);
 
 // Bounded Telemetry Buffer Queue (2 MiB)
 void telemetry_queue_init(void);

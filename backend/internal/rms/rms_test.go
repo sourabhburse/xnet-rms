@@ -91,6 +91,50 @@ func TestBuiltInDeviceOverviewProfile(t *testing.T) {
 	}
 }
 
+func TestMonitoringTemplateValidationAndThresholdPriority(t *testing.T) {
+	warning, critical := float64(70), float64(90)
+	def := monitoringTemplateDefinition{CatalogVersion: monitoringCatalogVersion, IntervalSeconds: 60, Metrics: []templateMetric{{MetricID: "system.cpu_usage", Threshold: &metricThreshold{Warning: &thresholdCondition{Operator: "gt", Value: &warning}, Critical: &thresholdCondition{Operator: "gt", Value: &critical}}}}, Stale: staleRule{Enabled: true, Severity: "warning", MissedIntervals: 2}}
+	if err := validateTemplateDefinition(&def); err != nil {
+		t.Fatal(err)
+	}
+	if severity := thresholdSeverity(def.Metrics[0].Threshold, Selected{Kind: "gauge", Value: float64(95)}); severity != "critical" {
+		t.Fatalf("critical must win over warning, got %s", severity)
+	}
+	if severity := thresholdSeverity(def.Metrics[0].Threshold, Selected{Kind: "gauge", Value: float64(80)}); severity != "warning" {
+		t.Fatalf("expected warning, got %s", severity)
+	}
+	def.Metrics[0].MetricID = "unknown.raw.ubus"
+	if validateTemplateDefinition(&def) == nil {
+		t.Fatal("accepted metric outside the server-owned catalog")
+	}
+}
+
+func TestMonitoringStateThresholdNormalization(t *testing.T) {
+	def := monitoringTemplateDefinition{CatalogVersion: monitoringCatalogVersion, IntervalSeconds: 300, Metrics: []templateMetric{{MetricID: "cellular.registration", Threshold: &metricThreshold{States: map[string]string{" Registered Home ": "healthy", "ROAMING": "warning", "not registered": "critical"}}}}}
+	if err := validateTemplateDefinition(&def); err != nil {
+		t.Fatal(err)
+	}
+	for value, expected := range map[string]string{"registered home": "healthy", "roaming": "warning", "not registered": "critical"} {
+		if actual := thresholdSeverity(def.Metrics[0].Threshold, Selected{Kind: "state", Value: value}); actual != expected {
+			t.Fatalf("%s: got %s want %s", value, actual, expected)
+		}
+	}
+}
+
+func TestIPsecBuiltInProfileAllowed(t *testing.T) {
+	p, err := compiledProfile(randomID(), "ipsec", compiledSource{interval: 60, fields: map[string]Field{"state": metricByID["ipsec.state"].Field}})
+	if err != nil || p.CollectorID != "ipsec" || p.Entities != "/tunnels" || p.EntityKey != "/id" {
+		t.Fatal(p, err)
+	}
+}
+
+func TestCompiledModbusHealthProfile(t *testing.T) {
+	p, err := compiledProfile(randomID(), "modbus_health", compiledSource{interval: 300, fields: map[string]Field{"gateway_state": metricByID["industrial.modbus_gateway"].Field}})
+	if err != nil || p.CollectorID != "modbus_health" || p.Type != "builtin" || p.MaxOutput != 4096 {
+		t.Fatalf("unexpected Modbus profile: %#v %v", p, err)
+	}
+}
+
 func TestBuiltInDeviceOverviewExtraction(t *testing.T) {
 	p := Profile{Fields: []Field{
 		{ID: "cpu_usage_percent", Path: "/cpu_usage_percent", Label: "CPU", Unit: "%", Kind: "gauge"},

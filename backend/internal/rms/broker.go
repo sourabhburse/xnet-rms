@@ -47,12 +47,27 @@ func (s *Core) StartMQTT(ctx context.Context) (mqtt.Client, error) {
 							Status string `json:"status"`
 						}
 						if json.Unmarshal(p.data, &beat) == nil {
+							now := time.Now().UTC()
 							if beat.Status == "online" {
-								s.DB.Exec("UPDATE devices SET last_seen=now() WHERE id=$1 AND NOT revoked", id)
+								minute := uint(now.Minute())
+								mask := int64(1) << minute
+								s.DB.Exec(`WITH touched AS (
+									UPDATE devices SET last_seen=$2 WHERE id=$1 AND NOT revoked RETURNING id
+								) INSERT INTO presence_hours(device_id,hour,seen_minutes)
+								SELECT id,date_trunc('hour',$2::timestamptz),$3 FROM touched
+								ON CONFLICT(device_id,hour) DO UPDATE
+								SET seen_minutes=presence_hours.seen_minutes | EXCLUDED.seen_minutes`, id, now, mask)
 							} else if beat.Status == "offline" {
-								s.DB.Exec("UPDATE devices SET last_seen=now()-interval '180 seconds' WHERE id=$1 AND NOT revoked", id)
+								s.DB.Exec(`WITH touched AS (
+									UPDATE devices SET last_seen=$2-interval '180 seconds' WHERE id=$1 AND NOT revoked AND last_seen>$2-interval '180 seconds' RETURNING id
+								) INSERT INTO presence_hours(device_id,hour,offline_events)
+								SELECT id,date_trunc('hour',$2::timestamptz),1 FROM touched
+								ON CONFLICT(device_id,hour) DO UPDATE
+								SET offline_events=presence_hours.offline_events+1`, id, now)
 							}
 						}
+					case "previews":
+						s.acceptMonitoringPreview(id, p.data)
 					}
 				}
 			}

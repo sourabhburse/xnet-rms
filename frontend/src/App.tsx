@@ -35,6 +35,7 @@ import GroupsManager from './components/GroupsManager';
 import SessionsManager from './components/SessionsManager';
 import AdminViews from './components/AdminViews';
 import ReportsView from './components/ReportsView';
+import AlertsView from './components/AlertsView';
 import Login from './Login';
 
 export default function App() {
@@ -72,6 +73,7 @@ export default function App() {
   const [groups, setGroups] = useState<DeviceGroup[]>([]);
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [adminData, setAdminData] = useState<any[]>([]);
+  const [alertUnread, setAlertUnread] = useState(0);
 
   // UI state
   const [loading, setLoading] = useState<boolean>(false);
@@ -135,14 +137,16 @@ export default function App() {
       const isOperator = isOrgAdmin || user.role === 'OPERATOR';
 
       // Always fetch dashboard stats and tags
-      const [dashStats, tagList, groupList] = await Promise.all([
+      const [dashStats, tagList, groupList, alertSummary] = await Promise.all([
         api<DashboardStats>(`dashboard${selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : ''}`).catch(() => ({ total: 0, online: 0, offline: 0, revoked: 0 })),
         api<TagItem[]>('tags').catch(() => []),
         api<DeviceGroup[]>(`groups${selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : ''}`).catch(() => []),
+        api<{ unacknowledged: number }>(`alerts${selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : ''}`).catch(() => ({ unacknowledged: 0 })),
       ]);
       setStats(dashStats && typeof dashStats === 'object' ? dashStats : { total: 0, online: 0, offline: 0, revoked: 0 });
       setTags(Array.isArray(tagList) ? tagList : []);
       setGroups(Array.isArray(groupList) ? groupList : []);
+      setAlertUnread(alertSummary.unacknowledged || 0);
 
       // Fetch pending devices and registrations if admin
       if (isOrgAdmin) {
@@ -185,7 +189,9 @@ export default function App() {
         const suffix = selectedOrg && ['users', 'enrollment-tokens', 'audit-logs'].includes(view)
           ? `?organization_id=${encodeURIComponent(selectedOrg)}`
           : '';
-        const res = await api<any[]>(`${view}${suffix}`);
+        const endpoint = view === 'profiles' ? 'monitoring/templates' : view;
+        const templateSuffix = view === 'profiles' && selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : suffix;
+        const res = await api<any[]>(`${endpoint}${templateSuffix}`);
         setAdminData(Array.isArray(res) ? res : []);
       }
     } catch (err) {
@@ -292,6 +298,7 @@ export default function App() {
     'registration-requests': 'Devices',
     sessions: 'Sessions',
     reports: 'Telemetry reports',
+    alerts: 'Alerts',
     tags: 'Customer tags',
     users: 'Users',
     'enrollment-tokens': 'Enrollment tokens',
@@ -331,7 +338,7 @@ export default function App() {
         }}
         currentView={view}
         onSelectView={goToView}
-        counts={{ devices: deviceTotal, sessions: activeSessionCount }}
+        counts={{ devices: deviceTotal, sessions: activeSessionCount, alerts: alertUnread }}
         crumb={crumb}
         searchValue={searchQuery}
         onSearchChange={setSearchQuery}
@@ -358,9 +365,10 @@ export default function App() {
               <DeviceDetail
                 device={detailDevice}
                 user={user}
-                sessions={sessions}
                 onBack={() => goToView('devices')}
                 onRefreshDevice={refreshData}
+                sessions={sessions}
+                tags={tags}
               />
             ) : (
               <div className="rounded-xl border border-border bg-card p-8 text-sm text-muted-foreground">
@@ -493,6 +501,9 @@ export default function App() {
             )}
             {view === 'reports' && (
               <ReportsView devices={devices} groups={groups} tags={tags} selectedOrg={selectedOrg} />
+            )}
+            {view === 'alerts' && (
+              <AlertsView user={user} selectedOrg={selectedOrg} onUnreadChange={setAlertUnread} />
             )}
             {['users', 'enrollment-tokens', 'organizations', 'profiles', 'bundles', 'audit-logs'].includes(view) && (
               <AdminViews

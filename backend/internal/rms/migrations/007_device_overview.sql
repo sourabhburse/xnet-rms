@@ -34,6 +34,7 @@ VALUES (
         {"id":"load_15m","path":"/load_15m","label":"Load (15m)","unit":"load","kind":"gauge"},
         {"id":"memory_total_bytes","path":"/memory_total_bytes","label":"Memory total","unit":"B","kind":"gauge"},
         {"id":"memory_available_bytes","path":"/memory_available_bytes","label":"Memory available","unit":"B","kind":"gauge"},
+        {"id":"memory_used_bytes","path":"/memory_used_bytes","label":"Memory used","unit":"B","kind":"gauge","chart":true,"fleet":true},
         {"id":"network_type","path":"/network_type","label":"Network type","kind":"text"},
         {"id":"registration","path":"/registration","label":"Registration","kind":"state","fleet":true},
         {"id":"operator_name","path":"/operator_name","label":"Operator","kind":"text","fleet":true},

@@ -25,7 +25,7 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 
-import { Device, SessionItem, SnapshotField, SnapshotSource, User } from "../types";
+import { Device, SessionItem, SnapshotField, SnapshotSource, TagItem, User } from "../types";
 import { api, formatApiError } from "../api";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +47,7 @@ interface DeviceDetailProps {
   device: Device;
   user: User;
   sessions: SessionItem[];
+  tags?: TagItem[];
   onBack: () => void;
   onRefreshDevice: () => void;
 }
@@ -169,6 +170,7 @@ export default function DeviceDetail({
   device,
   user,
   sessions,
+  tags = [],
   onBack,
   onRefreshDevice,
 }: DeviceDetailProps) {
@@ -182,6 +184,7 @@ export default function DeviceDetail({
   const [closingSessionID, setClosingSessionID] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [revokeOpen, setRevokeOpen] = useState(false);
+  const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [sessionNotice, setSessionNotice] = useState<{
     type: NoticeType;
     title: string;
@@ -192,6 +195,7 @@ export default function DeviceDetail({
 
   const isSuperAdmin = user.role === "SUPER_ADMIN";
   const canOperate = user.role !== "VIEWER";
+  const canAdmin = user.role === "ORG_ADMIN" || user.role === "SUPER_ADMIN";
 
   const loadSnapshots = async () => {
     setLoadingSnapshots(true);
@@ -303,6 +307,17 @@ export default function DeviceDetail({
     }
   };
 
+  const toggleTag = async (tag: TagItem) => {
+    const assigned = device.tags?.includes(tag.name);
+    try {
+      await api(`devices/${device.id}/tags/${tag.id}`, assigned ? "DELETE" : "PUT");
+      toast.success(assigned ? "Tag removed" : "Tag assigned");
+      onRefreshDevice();
+    } catch (err) {
+      toast.error(formatApiError(err).message);
+    }
+  };
+
   return (
     <div className="mx-auto flex max-w-[1400px] flex-col gap-4.5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -327,7 +342,7 @@ export default function DeviceDetail({
             <DropdownMenuContent align="end" className="min-w-[190px]">
               <DropdownMenuItem disabled>Rename device</DropdownMenuItem>
               <DropdownMenuItem disabled>Move to group…</DropdownMenuItem>
-              <DropdownMenuItem disabled>Edit tags…</DropdownMenuItem>
+              <DropdownMenuItem disabled={!canAdmin} onSelect={() => setTagEditorOpen(true)}>Edit tags…</DropdownMenuItem>
               {isSuperAdmin && !device.revoked && <><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" onSelect={() => setRevokeOpen(true)}>Revoke access…</DropdownMenuItem></>}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -376,7 +391,7 @@ export default function DeviceDetail({
                   ["Firmware", device.firmware_version ? `v${device.firmware_version}` : "—", true],
                   ["Last communication", device.last_seen ? new Date(device.last_seen).toLocaleString() : "Never", true],
                 ].map(([label, value, mono]) => <div key={String(label)}><dt className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</dt><dd className={cn("mt-1 text-[12.5px] text-foreground/90", mono && "font-mono text-[11px]")}>{value}</dd></div>)}
-                <div className="sm:col-span-2"><dt className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Customer tags</dt><dd className="mt-1.5 flex flex-wrap gap-1.5">{device.tags?.length ? device.tags.map((tag) => <Badge key={tag} variant="secondary" className="font-normal">{tag}</Badge>) : <span className="text-[12px] text-muted-foreground">No tags assigned</span>}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Customer tags</dt><dd className="mt-1.5 flex flex-wrap gap-1.5">{device.tags?.length ? device.tags.map((tag) => <Badge key={tag} variant="secondary" className="font-normal">{tag}</Badge>) : <span className="text-[12px] text-muted-foreground">No tags assigned</span>}{canAdmin && <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setTagEditorOpen(open => !open)}>Edit</Button>}</dd>{tagEditorOpen && <div className="mt-2 flex flex-wrap gap-2 rounded-md border border-border p-2">{tags.filter(tag => tag.organization_id === device.organization_id).map(tag => <button type="button" key={tag.id} onClick={() => toggleTag(tag)} className={cn("rounded-full border px-2 py-1 text-[11px]", device.tags?.includes(tag.name) ? "border-primary bg-accent text-accent-foreground" : "border-border text-muted-foreground")}>{device.tags?.includes(tag.name) ? "✓ " : "+ "}{tag.name}</button>)}</div>}</div>
                 <div className="sm:col-span-2"><dt className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Internal ID</dt><dd className="mt-1 truncate font-mono text-[10.5px] text-muted-foreground" title={device.id}>{device.id}</dd></div>
               </dl></CardContent>
             </Card>
