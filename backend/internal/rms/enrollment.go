@@ -80,6 +80,10 @@ func (s *Core) enroll(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "enrollment conflict")
 		return
 	}
+	if e = assignDefaultTelemetry(tx, id); e != nil {
+		fail(w, 503, "enrollment failed")
+		return
+	}
 	cert, e := s.CA.Issue(id, csr.PublicKey, time.Now())
 	if e == nil {
 		e = audit(tx, org, "", "device.enroll", id)

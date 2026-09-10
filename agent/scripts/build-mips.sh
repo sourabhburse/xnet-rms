@@ -3,7 +3,7 @@
 set -eu
 : "${OPENWRT_ROOT:?Set the existing OpenWrt source or SDK root}"
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
-out=${1:-"$root/artifacts/agent-2.1.3"}
+out=${1:-"$root/artifacts/agent-2.2.0"}
 mkdir -p "$out"
 out=$(CDPATH= cd -- "$out" && pwd)
 stage="$OPENWRT_ROOT/staging_dir/target-mips_24kc_musl"
@@ -29,11 +29,12 @@ install -m 0755 "$out/niseva-agent" "$pkg/usr/sbin/niseva-agent"
 install -m 0755 "$root/agent/files/niseva.init" "$pkg/etc/init.d/niseva-agent"
 install -m 0600 "$root/agent/files/niseva.config" "$pkg/etc/config/niseva"
 install -m 0755 "$root/agent/files/ipsec.lua" "$pkg/usr/libexec/xnet-rms/ipsec.lua"
+install -m 0755 "$root/agent/files/device-overview.sh" "$pkg/usr/libexec/xnet-rms/device-overview.sh"
 printf '/etc/xnet-rms/\n/etc/config/niseva\n' > "$pkg/lib/upgrade/keep.d/niseva-agent"
 printf '/etc/config/niseva\n' > "$pkg/CONTROL/conffiles"
 cat > "$pkg/CONTROL/control" <<'CONTROL'
 Package: niseva-agent
-Version: 2.1.3-1
+Version: 2.2.0-1
 Architecture: mips_24kc
 Maintainer: Niseva Engineering <support@niseva.com>
 Section: net
@@ -42,5 +43,5 @@ Depends: libc, libgcc1, libubox20191228, libuci20130104, libmosquitto-ssl, libcu
 Description: XNET RMS certificate identity, bounded collection and remote sessions
 CONTROL
 sh "$OPENWRT_ROOT/scripts/ipkg-build" -o 0 -g 0 "$pkg" "$out"
-(cd "$out" && sha256sum niseva-agent niseva-agent_2.1.3-1_mips_24kc.ipk > SHA256SUMS)
-echo "Built $out/niseva-agent_2.1.3-1_mips_24kc.ipk"
+(cd "$out" && sha256sum niseva-agent niseva-agent_2.2.0-1_mips_24kc.ipk > SHA256SUMS)
+echo "Built $out/niseva-agent_2.2.0-1_mips_24kc.ipk"

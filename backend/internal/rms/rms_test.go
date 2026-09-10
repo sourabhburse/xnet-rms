@@ -65,6 +65,47 @@ func TestFieldTypeAggregates(t *testing.T) {
 		t.Fatal(a)
 	}
 }
+
+func TestBuiltInDeviceOverviewProfile(t *testing.T) {
+	p := Profile{
+		ID:          DeviceOverviewProfileID,
+		Version:     1,
+		Name:        "Device overview telemetry",
+		SourceID:    "device_overview",
+		Type:        "builtin",
+		CollectorID: "device_overview",
+		Interval:    60,
+		Timeout:     10,
+		MaxOutput:   32768,
+		Fields: []Field{
+			{ID: "cpu_usage_percent", Path: "/cpu_usage_percent", Label: "CPU", Unit: "%", Kind: "gauge"},
+			{ID: "registration", Path: "/registration", Label: "Registration", Kind: "state"},
+		},
+	}
+	if e := p.Validate(); e != nil {
+		t.Fatal(e)
+	}
+	p.CollectorID = "untrusted"
+	if p.Validate() == nil {
+		t.Fatal("accepted unsupported built-in collector")
+	}
+}
+
+func TestBuiltInDeviceOverviewExtraction(t *testing.T) {
+	p := Profile{Fields: []Field{
+		{ID: "cpu_usage_percent", Path: "/cpu_usage_percent", Label: "CPU", Unit: "%", Kind: "gauge"},
+		{ID: "rssi_dbm", Path: "/rssi_dbm", Label: "RSSI", Unit: "dBm", Kind: "gauge"},
+		{ID: "temperature_c", Path: "/temperature_c", Label: "Temperature", Unit: "°C", Kind: "gauge"},
+	}}
+	values, e := Extract(p, []byte(`{"cpu_usage_percent":12.5,"rssi_dbm":-75,"temperature_c":null}`))
+	if e != nil || len(values) != 2 {
+		t.Fatal(values, e)
+	}
+	if values["cpu_usage_percent"].Value != float64(12.5) || values["rssi_dbm"].Value != float64(-75) {
+		t.Fatal(values)
+	}
+}
+
 func TestCertificatesAndProof(t *testing.T) {
 	dir := t.TempDir()
 	if e := InitPKI(dir, []string{"localhost"}); e != nil {

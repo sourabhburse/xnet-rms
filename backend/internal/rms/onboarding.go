@@ -231,6 +231,10 @@ func (s *Core) bootstrapCheckin(w http.ResponseWriter, r *http.Request) {
 	output(w, 200, map[string]string{"registration_state": state, "code": state})
 }
 func (s *Core) finishBootstrap(w http.ResponseWriter, tx *sql.Tx, id, org string, csr *x509.CertificateRequest) {
+	if e := assignDefaultTelemetry(tx, id); e != nil {
+		onboardingError(w, 503, "temporarily_unavailable")
+		return
+	}
 	cert, e := s.CA.Issue(id, csr.PublicKey, time.Now())
 	var name string
 	if e == nil {
@@ -258,6 +262,9 @@ func activatePending(tx *sql.Tx, pending, org, name string, tags []byte, user st
 	}
 	if e == nil {
 		_, e = tx.Exec("INSERT INTO device_group_members(group_id,device_id) SELECT tg.group_id,$2 FROM enrollment_token_groups tg JOIN pending_devices p ON p.token_id=tg.token_id WHERE p.id=$1 ON CONFLICT DO NOTHING", pending, id)
+	}
+	if e == nil {
+		e = assignDefaultTelemetry(tx, id)
 	}
 	if e == nil {
 		e = audit(tx, org, user, "device.claim", id)

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,15 @@ import (
 )
 
 const MaxSnapshot = 64 * 1024
+const DeviceOverviewProfileID = "8f8d7a2c0d1e4b6aa1c2d3e4f5061728"
+
+func assignDefaultTelemetry(tx *sql.Tx, deviceID string) error {
+	_, e := tx.Exec(`INSERT INTO assignments(device_id,profile_id,version,active)
+SELECT $1,p.id,p.version,true FROM profiles p
+WHERE p.id=$2 AND p.version=1
+ON CONFLICT(device_id,profile_id,version) DO UPDATE SET active=true`, deviceID, DeviceOverviewProfileID)
+	return e
+}
 
 type Field struct {
 	ID     string            `json:"id"`
@@ -46,6 +56,7 @@ type Profile struct {
 	Args          json.RawMessage `json:"args,omitempty"`
 	BundleID      string          `json:"bundle_id,omitempty"`
 	BundleVersion int             `json:"bundle_version,omitempty"`
+	CollectorID   string          `json:"collector_id,omitempty"`
 	Interval      int             `json:"interval_seconds"`
 	Timeout       int             `json:"timeout_seconds"`
 	MaxOutput     int             `json:"max_output_bytes"`
@@ -75,8 +86,12 @@ func (p Profile) Validate() error {
 		if !validID(p.BundleID) || p.BundleVersion < 1 {
 			return errors.New("approved bundle required")
 		}
+	} else if p.Type == "builtin" {
+		if p.CollectorID != "device_overview" {
+			return errors.New("unsupported built-in collector")
+		}
 	} else {
-		return errors.New("only script and ubus collection supported")
+		return errors.New("only script, ubus and built-in collection supported")
 	}
 	seen := map[string]bool{}
 	for _, f := range p.Fields {

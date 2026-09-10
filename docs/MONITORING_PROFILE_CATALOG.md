@@ -6,6 +6,20 @@ fields shown in device views, fleet columns, charts, filters, and reports.
 Users receive the fields assigned to their organization; they do not execute
 arbitrary commands on a router.
 
+## Baseline device overview profile
+
+Every non-revoked device receives the `device_overview` profile during the
+database migration and when it is enrolled or claimed. It uses the
+`device_overview` built-in collector shipped with the agent, so it does not
+depend on a user-published shell bundle. The collector emits flat fields for
+CPU busy percentage, memory used percentage, RX/TX byte counters, aggregate
+throughput in bytes per second, uptime, load averages, RSSI, registration,
+operator, band, SIM state, and data connectivity. CPU and throughput are
+unavailable in the first sample because they require a previous counter
+sample. RSRP, SINR, and temperature are emitted only when the router exposes
+those values; unsupported values remain absent rather than being reported as
+zero.
+
 ## Cellular profile for `ubus call cellular status`
 
 The current cellular service returns an object whose `message` field is a JSON
