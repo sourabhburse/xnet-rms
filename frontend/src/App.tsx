@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   AuditRecord,
@@ -22,6 +23,7 @@ import { AppShell } from './components/shell/AppShell';
 import { DevicesArea, DEVICE_TAB_VIEWS } from './components/devices/DevicesArea';
 import { Toaster } from './components/ui/sonner';
 import { useTheme } from './lib/use-theme';
+import { parseAppRoute, routeForDevice, routeForView } from './lib/routes';
 import FleetOverview from './components/overview/FleetOverview';
 import DeviceList from './components/DeviceList';
 import DeviceDetail from './components/DeviceDetail';
@@ -35,11 +37,18 @@ import AdminViews from './components/AdminViews';
 import Login from './Login';
 
 export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { view, deviceSerial } = useMemo(
+    () => parseAppRoute(location.pathname, location.search),
+    [location.pathname, location.search]
+  );
   const [user, setUser] = useState<User | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
-  // Active navigation view
-  const [view, setView] = useState<string>('dashboard');
+  // The URL is the navigation source of truth. Keep the selected object as a
+  // short-lived cache so a clicked device opens immediately while its route
+  // can also be loaded directly in a new tab or after a refresh.
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
 
   // Organization scoping
@@ -68,6 +77,25 @@ export default function App() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [globalError, setGlobalError] = useState<string>('');
   const { theme, toggle: toggleTheme } = useTheme();
+
+  const isDeviceDetail = Boolean(deviceSerial);
+  const detailDevice =
+    selectedDevice?.serial_number === deviceSerial ? selectedDevice : null;
+
+  const goToView = (nextView: string) => {
+    setSelectedDevice(null);
+    setPage(1);
+    navigate(routeForView(nextView));
+  };
+
+  const selectDevice = (device: Device) => {
+    setSelectedDevice(device);
+    navigate(routeForDevice(device.serial_number));
+  };
+
+  useEffect(() => {
+    if (!deviceSerial) setSelectedDevice(null);
+  }, [deviceSerial]);
 
   // Initial Auth Verification
   useEffect(() => {
@@ -135,19 +163,23 @@ export default function App() {
 
       // Fetch view-specific dataset
       if (view === 'devices' || view === 'dashboard' || view === 'groups') {
+        const lookupQuery = deviceSerial || searchQuery;
         const params = new URLSearchParams({
           page: String(page),
-          q: searchQuery,
-          tag: selectedTag,
+          q: lookupQuery,
+          tag: deviceSerial ? '' : selectedTag,
+          status: deviceSerial ? '' : statusFilter,
         });
         if (selectedOrg) params.set('organization_id', selectedOrg);
         const res = await api<{ items: Device[]; total: number }>(`devices?${params}`);
-        let items = Array.isArray(res?.items) ? res.items : [];
-        if (statusFilter) {
-          items = items.filter(d => d.status === statusFilter);
-        }
+        const items = Array.isArray(res?.items) ? res.items : [];
         setDevices(items);
-        setTotalDevices(statusFilter ? items.length : (res?.total || 0));
+        setTotalDevices(res?.total || 0);
+        if (deviceSerial) {
+          const matched = items.find((item) => item.serial_number === deviceSerial);
+          setSelectedDevice(matched || null);
+          if (!matched) setGlobalError('The requested device was not found.');
+        }
       } else if (['users', 'enrollment-tokens', 'audit-logs', 'organizations', 'profiles', 'bundles'].includes(view)) {
         const suffix = selectedOrg && ['users', 'enrollment-tokens', 'audit-logs'].includes(view)
           ? `?organization_id=${encodeURIComponent(selectedOrg)}`
@@ -173,14 +205,14 @@ export default function App() {
     if (user) {
       refreshData();
     }
-  }, [user, view, page, searchQuery, selectedTag, statusFilter, selectedOrg]);
+  }, [user, view, page, searchQuery, selectedTag, statusFilter, selectedOrg, deviceSerial]);
 
   // Periodic background refresh every 30 seconds
   useEffect(() => {
     if (!user) return;
     const interval = setInterval(refreshData, 30000);
     return () => clearInterval(interval);
-  }, [user, view, page, searchQuery, selectedTag, statusFilter, selectedOrg]);
+  }, [user, view, page, searchQuery, selectedTag, statusFilter, selectedOrg, deviceSerial]);
 
   // Remote LuCI Launcher (Server-Side SSH_LUCI)
   const handleOpenLuCI = async (dev: Device) => {
@@ -227,6 +259,7 @@ export default function App() {
     } catch {}
     setUser(null);
     setSelectedDevice(null);
+    navigate('/overview', { replace: true });
   };
 
   // Unauthenticated: Show NCMS-inspired Login Screen
@@ -249,10 +282,6 @@ export default function App() {
   const activeSessionCount = sessions.filter(s => !s.closed_at).length;
   const deviceTotal = stats.total || totalDevices;
 
-  const orgName =
-    organizations.find(o => o.id === (selectedOrg || user.organization_id))?.name ||
-    (user.role === 'SUPER_ADMIN' ? 'All customers' : 'Workspace');
-
   const viewTitles: Record<string, string> = {
     dashboard: 'Overview',
     devices: 'Devices',
@@ -270,11 +299,17 @@ export default function App() {
     bundles: 'Collector bundles',
   };
 
-  const crumb = selectedDevice ? (
+  const crumb = detailDevice ? (
     <>
       <span>Devices</span>
       <span className="mx-1.5 text-muted-foreground">/</span>
-      <b>{selectedDevice.name || selectedDevice.serial_number}</b>
+      <b>{detailDevice.name || detailDevice.serial_number}</b>
+    </>
+  ) : deviceSerial ? (
+    <>
+      <span>Devices</span>
+      <span className="mx-1.5 text-muted-foreground">/</span>
+      <b>{deviceSerial}</b>
     </>
   ) : (
     <b>{viewTitles[view] || 'Overview'}</b>
@@ -286,7 +321,6 @@ export default function App() {
     <>
       <AppShell
         user={user}
-        orgName={orgName}
         organizations={organizations}
         selectedOrg={selectedOrg}
         onSelectOrg={orgId => {
@@ -294,20 +328,14 @@ export default function App() {
           setPage(1);
         }}
         currentView={view}
-        onSelectView={viewKey => {
-          setView(viewKey);
-          setSelectedDevice(null);
-          setPage(1);
-        }}
+        onSelectView={goToView}
         counts={{ devices: deviceTotal, sessions: activeSessionCount }}
         crumb={crumb}
         searchValue={searchQuery}
         onSearchChange={setSearchQuery}
         onSearchSubmit={value => {
           setSearchQuery(value);
-          setView('devices');
-          setSelectedDevice(null);
-          setPage(1);
+          goToView('devices');
         }}
         onRefresh={refreshData}
         refreshing={refreshing}
@@ -322,17 +350,20 @@ export default function App() {
           </div>
         )}
 
-        {selectedDevice ? (
+        {isDeviceDetail ? (
           <div className="p-6">
-            <DeviceDetail
-              device={selectedDevice}
-              user={user}
-              onBack={() => {
-                setSelectedDevice(null);
-                refreshData();
-              }}
-              onRefreshDevice={refreshData}
-            />
+            {detailDevice ? (
+              <DeviceDetail
+                device={detailDevice}
+                user={user}
+                onBack={() => goToView('devices')}
+                onRefreshDevice={refreshData}
+              />
+            ) : (
+              <div className="rounded-xl border border-border bg-card p-8 text-sm text-muted-foreground">
+                Loading device details…
+              </div>
+            )}
           </div>
         ) : view === 'dashboard' ? (
           <FleetOverview
@@ -343,10 +374,10 @@ export default function App() {
             groups={groups}
             devices={devices}
             user={user}
-            onNavigate={v => setView(v)}
+            onNavigate={goToView}
             onSelectFilter={s => {
               setStatusFilter(s);
-              setView('devices');
+              goToView('devices');
             }}
             onOpenLuCI={handleOpenLuCI}
             onOpenTerminal={handleOpenTerminal}
@@ -355,10 +386,7 @@ export default function App() {
           <DevicesArea
             user={user}
             currentView={view}
-            onSelectView={v => {
-              setView(v);
-              setPage(1);
-            }}
+            onSelectView={goToView}
             counts={{
               devices: deviceTotal,
               groups: groups.length,
@@ -390,7 +418,7 @@ export default function App() {
                   setPage(1);
                 }}
                 onPageChange={setPage}
-                onSelectDevice={setSelectedDevice}
+                onSelectDevice={selectDevice}
                 onOpenLuCI={handleOpenLuCI}
                 onOpenTerminal={handleOpenTerminal}
               />
@@ -413,7 +441,7 @@ export default function App() {
                 selectedOrg={selectedOrg}
                 onSuccess={() => {
                   refreshData();
-                  setView('registration-requests');
+                  goToView('registration-requests');
                 }}
                 onRefreshTags={refreshData}
               />

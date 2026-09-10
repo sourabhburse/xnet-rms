@@ -10,6 +10,7 @@ import (
 	"niseva-rms/backend/internal/rms"
 	"os"
 	"os/signal"
+	pathpkg "path"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +18,20 @@ import (
 
 //go:embed dist/*
 var embedded embed.FS
+
+func serveApplication(files http.Handler, ui fs.FS, w http.ResponseWriter, r *http.Request) {
+	uiPath := strings.Trim(r.URL.Path, "/")
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && uiPath != "" &&
+		!strings.HasPrefix(uiPath, "assets/") && pathpkg.Ext(uiPath) == "" {
+		if _, err := fs.Stat(ui, uiPath); err != nil {
+			clone := r.Clone(r.Context())
+			clone.URL.Path = "/"
+			files.ServeHTTP(w, clone)
+			return
+		}
+	}
+	files.ServeHTTP(w, r)
+}
 
 func main() {
 	mode := flag.String("mode", "core", "core, tunnel, migrate, init-ca, admin")
@@ -97,7 +112,7 @@ func main() {
 				api.ServeHTTP(w, r)
 				return
 			}
-			files.ServeHTTP(w, r)
+			serveApplication(files, ui, w, r)
 		})
 	} else if *mode == "tunnel" {
 		g, e := rms.NewGateway(c, ui)

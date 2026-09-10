@@ -10,7 +10,6 @@ import {
   ScrollText,
   Building2,
   TerminalSquare,
-  ChevronsUpDown,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -36,7 +35,6 @@ interface NavSection {
 
 interface AppSidebarProps {
   user: User;
-  orgName: string;
   currentView: string;
   onSelectView: (view: string) => void;
   counts: SidebarCounts;
@@ -44,7 +42,6 @@ interface AppSidebarProps {
 
 export function AppSidebar({
   user,
-  orgName,
   currentView,
   onSelectView,
   counts,
@@ -119,24 +116,6 @@ export function AppSidebar({
           </div>
         </div>
       </div>
-
-      <button
-        type="button"
-        className="mx-3 mb-2.5 flex items-center gap-2.5 rounded-lg border border-border bg-secondary/60 px-2.5 py-2 text-left transition-colors hover:border-border/80 hover:bg-secondary"
-      >
-        <span className="grid size-[22px] shrink-0 place-items-center rounded-md bg-accent text-[10px] font-bold text-accent-foreground">
-          {orgName.slice(0, 2).toUpperCase()}
-        </span>
-        <span className="min-w-0 flex-1 leading-tight">
-          <span className="block truncate text-[12.5px] font-semibold text-foreground">
-            {orgName}
-          </span>
-          <span className="block text-[10.5px] text-muted-foreground">
-            {counts.devices.toLocaleString()} devices
-          </span>
-        </span>
-        <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
-      </button>
 
       <nav className="flex-1 overflow-y-auto px-2.5 pb-4">
         {sections.map((section, si) => (

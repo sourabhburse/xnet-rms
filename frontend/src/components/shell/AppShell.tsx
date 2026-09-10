@@ -7,7 +7,6 @@ import { Theme } from "@/lib/use-theme";
 
 interface AppShellProps {
   user: User;
-  orgName: string;
   organizations: Organization[];
   selectedOrg: string;
   onSelectOrg: (orgId: string) => void;
@@ -28,7 +27,6 @@ interface AppShellProps {
 
 export function AppShell({
   user,
-  orgName,
   organizations,
   selectedOrg,
   onSelectOrg,
@@ -51,7 +49,6 @@ export function AppShell({
       <div className="hidden min-h-0 lg:block">
         <AppSidebar
           user={user}
-          orgName={orgName}
           currentView={currentView}
           onSelectView={onSelectView}
           counts={counts}

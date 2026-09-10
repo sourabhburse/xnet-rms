@@ -57,8 +57,16 @@ export function Topbar({
 }: TopbarProps) {
   const isSuperAdmin = user.role === "SUPER_ADMIN";
   const initials = (user.email || "?").slice(0, 2).toUpperCase();
+  const [searchDraft, setSearchDraft] = React.useState(searchValue);
   const activeOrgName =
     organizations.find((o) => o.id === selectedOrg)?.name ?? "All customers";
+
+  React.useEffect(() => setSearchDraft(searchValue), [searchValue]);
+
+  const submitSearch = () => {
+    onSearchChange(searchDraft);
+    onSearchSubmit(searchDraft);
+  };
 
   return (
     <header className="flex h-[58px] shrink-0 items-center gap-3.5 border-b border-border bg-card px-4">
@@ -70,11 +78,14 @@ export function Topbar({
         <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           aria-label="Search devices"
-          value={searchValue}
+          value={searchDraft}
           placeholder="Search devices, serials, MAC…"
-          onChange={(e) => onSearchChange(e.target.value)}
+          onChange={(e) => setSearchDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") onSearchSubmit(searchValue);
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submitSearch();
+            }
           }}
           className="h-9 bg-secondary/60 pl-8 pr-12 text-[13px]"
         />
@@ -89,6 +100,7 @@ export function Topbar({
             <Button
               variant="outline"
               className="h-9 gap-2 px-3 text-[13px] font-normal"
+              aria-label={`Select customer scope, currently ${activeOrgName}`}
             >
               <Building2 className="size-3.5 text-muted-foreground" />
               <span className="max-w-[160px] truncate">{activeOrgName}</span>

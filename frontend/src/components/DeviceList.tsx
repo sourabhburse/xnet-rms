@@ -182,6 +182,10 @@ export default function DeviceList({
 
   useEffect(() => setSearchInput(searchQuery), [searchQuery]);
 
+  const applySearch = () => {
+    if (searchInput !== searchQuery) onSearchChange(searchInput);
+  };
+
   const modelOptions = useMemo(
     () => Array.from(new Set(devices.map((device) => device.model || "Niseva router"))).sort(),
     [devices]
@@ -400,9 +404,9 @@ export default function DeviceList({
     getCoreRowModel: getCoreRowModel(),
   });
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const first = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const last = Math.min(page * PAGE_SIZE, total);
   const showingCount = modelFilter || groupFilter ? filteredDevices.length : total;
+  const first = showingCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const last = Math.min(page * PAGE_SIZE, showingCount);
 
   return (
     <Card className="overflow-hidden">
@@ -419,13 +423,16 @@ export default function DeviceList({
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 aria-label="Search devices"
-                placeholder="Search devices"
+                placeholder="Search name, serial, MAC or model"
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") onSearchChange(searchInput);
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    applySearch();
+                  }
                 }}
-                onBlur={() => onSearchChange(searchInput)}
+                onBlur={applySearch}
                 className="h-8 pl-8 text-[12px]"
               />
             </div>
@@ -440,6 +447,7 @@ export default function DeviceList({
                   key={option.value || "all"}
                   type="button"
                   onClick={() => onStatusChange(option.value)}
+                  aria-pressed={statusFilter === option.value}
                   className={cn(
                     "rounded px-2 py-1 text-[11px] font-medium transition-colors",
                     statusFilter === option.value
@@ -455,7 +463,13 @@ export default function DeviceList({
               <FilterButton label="Model" value={modelFilter} />
               <DropdownMenuContent align="end" className="min-w-[190px]">
                 <DropdownMenuLabel>Model</DropdownMenuLabel>
-                <DropdownMenuRadioGroup value={modelFilter} onValueChange={setModelFilter}>
+                <DropdownMenuRadioGroup
+                  value={modelFilter}
+                  onValueChange={(value) => {
+                    setModelFilter(value);
+                    onPageChange(1);
+                  }}
+                >
                   <DropdownMenuRadioItem value="">All models</DropdownMenuRadioItem>
                   {modelOptions.map((model) => (
                     <DropdownMenuRadioItem key={model} value={model}>{model}</DropdownMenuRadioItem>
@@ -467,7 +481,13 @@ export default function DeviceList({
               <FilterButton label="Group" value={groupFilter} />
               <DropdownMenuContent align="end" className="min-w-[180px]">
                 <DropdownMenuLabel>Group</DropdownMenuLabel>
-                <DropdownMenuRadioGroup value={groupFilter} onValueChange={setGroupFilter}>
+                <DropdownMenuRadioGroup
+                  value={groupFilter}
+                  onValueChange={(value) => {
+                    setGroupFilter(value);
+                    onPageChange(1);
+                  }}
+                >
                   <DropdownMenuRadioItem value="">All groups</DropdownMenuRadioItem>
                   {groupOptions.map((group) => (
                     <DropdownMenuRadioItem key={group} value={group}>{group}</DropdownMenuRadioItem>

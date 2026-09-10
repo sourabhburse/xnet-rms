@@ -286,14 +286,19 @@ func (s *Core) listDevices(w http.ResponseWriter, r *http.Request) {
 	source := r.URL.Query().Get("source")
 	field := r.URL.Query().Get("field")
 	value := r.URL.Query().Get("value")
-	filter := ` ($1='' OR d.organization_id=$1) AND ($2='' OR d.serial_number ILIKE '%'||$2||'%') AND ($6='' OR EXISTS(SELECT 1 FROM device_tags dt JOIN tags tg ON tg.id=dt.tag_id WHERE dt.device_id=d.id AND tg.name=$6)) AND ($3='' OR EXISTS(SELECT 1 FROM current_snapshots f WHERE f.device_id=d.id AND f.source_id=$3 AND f.fields->$4->>'value'=$5)) `
-	args := []any{org, q, source, field, value, r.URL.Query().Get("tag")}
+	status := r.URL.Query().Get("status")
+	if status != "" && status != "ONLINE" && status != "OFFLINE" && status != "REVOKED" {
+		fail(w, 400, "invalid status")
+		return
+	}
+	filter := ` ($1='' OR d.organization_id=$1) AND ($2='' OR d.serial_number ILIKE '%'||$2||'%' OR d.name ILIKE '%'||$2||'%' OR d.lan_mac ILIKE '%'||$2||'%' OR d.model ILIKE '%'||$2||'%') AND ($6='' OR EXISTS(SELECT 1 FROM device_tags dt JOIN tags tg ON tg.id=dt.tag_id WHERE dt.device_id=d.id AND tg.name=$6)) AND ($3='' OR EXISTS(SELECT 1 FROM current_snapshots f WHERE f.device_id=d.id AND f.source_id=$3 AND f.fields->$4->>'value'=$5)) AND ($7='' OR CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END=$7) `
+	args := []any{org, q, source, field, value, r.URL.Query().Get("tag"), status}
 	var total int
 	if s.DB.QueryRow("SELECT count(*) FROM devices d WHERE "+filter, args...).Scan(&total) != nil {
 		fail(w, 503, "query unavailable")
 		return
 	}
-	rows, e := jsonRows(s.DB, `SELECT row_to_json(t) FROM (SELECT d.id,d.organization_id,d.name,d.lan_mac,coalesce((SELECT jsonb_agg(t.name ORDER BY t.name) FROM device_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.device_id=d.id),'[]') AS tags,coalesce((SELECT jsonb_agg(g.name ORDER BY g.name) FROM device_group_members gm JOIN device_groups g ON g.id=gm.group_id WHERE gm.device_id=d.id),'[]') AS groups,d.serial_number,d.model,d.firmware_version,d.revoked,d.last_seen,CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END AS status,coalesce((SELECT jsonb_agg(jsonb_build_object('source_id',c.source_id,'fields',c.fields,'status',c.status,'received_at',c.received_at,'observed_at',c.observed_at,'stale',c.observed_at<now()-((p.definition->>'interval_seconds')::integer*2)*interval '1 second')) FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE c.device_id=d.id),'[]') AS sources FROM devices d WHERE `+filter+` ORDER BY serial_number LIMIT 100 OFFSET $7) t`, append(args, (page-1)*100)...)
+	rows, e := jsonRows(s.DB, `SELECT row_to_json(t) FROM (SELECT d.id,d.organization_id,d.name,d.lan_mac,coalesce((SELECT jsonb_agg(t.name ORDER BY t.name) FROM device_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.device_id=d.id),'[]') AS tags,coalesce((SELECT jsonb_agg(g.name ORDER BY g.name) FROM device_group_members gm JOIN device_groups g ON g.id=gm.group_id WHERE gm.device_id=d.id),'[]') AS groups,d.serial_number,d.model,d.firmware_version,d.revoked,d.last_seen,CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END AS status,coalesce((SELECT jsonb_agg(jsonb_build_object('source_id',c.source_id,'fields',c.fields,'status',c.status,'received_at',c.received_at,'observed_at',c.observed_at,'stale',c.observed_at<now()-((p.definition->>'interval_seconds')::integer*2)*interval '1 second')) FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE c.device_id=d.id),'[]') AS sources FROM devices d WHERE `+filter+` ORDER BY serial_number LIMIT 100 OFFSET $8) t`, append(args, (page-1)*100)...)
 	if e != nil {
 		fail(w, 503, "query unavailable")
 		return
