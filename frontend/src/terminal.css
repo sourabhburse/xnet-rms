@@ -35,11 +35,12 @@ body {
 }
 
 .terminal-brand { gap: 11px; }
-.terminal-brand-mark { position: relative; display: flex; align-items: center; width: 34px; height: 24px; }
+.terminal-brand-mark { position: relative; display: flex; align-items: center; width: 43px; height: 24px; }
 .terminal-brand-mark span { position: absolute; width: 14px; height: 14px; border-radius: 999px; background: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.08); }
-.terminal-brand-mark span:nth-child(1) { left: 0; opacity: .88; }
-.terminal-brand-mark span:nth-child(2) { left: 9px; opacity: .72; }
-.terminal-brand-mark span:nth-child(3) { left: 18px; opacity: .5; }
+.terminal-brand-mark span:nth-child(1) { left: 0; opacity: .92; }
+.terminal-brand-mark span:nth-child(2) { left: 9px; opacity: .76; }
+.terminal-brand-mark span:nth-child(3) { left: 18px; opacity: .6; }
+.terminal-brand-mark span:nth-child(4) { left: 27px; opacity: .44; }
 .terminal-brand-name { font-size: 14px; font-weight: 700; letter-spacing: .01em; }
 .terminal-brand-caption { margin-top: 2px; color: rgba(255,255,255,.62); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 .terminal-header-actions { gap: 12px; }
