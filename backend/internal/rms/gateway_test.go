@@ -146,6 +146,20 @@ func TestTunnelPageKeepsJSONForNonDocumentRequests(t *testing.T) {
 	}
 }
 
+func TestTerminalPageInjectsEscapedDeviceDetails(t *testing.T) {
+	page := terminalPage([]byte(`<strong id="device-name">__XNET_DEVICE_NAME__</strong><span>__XNET_DEVICE_SERIAL__</span>`), Session{
+		DeviceName:   "Lab <Gateway>",
+		DeviceSerial: "FG090422657",
+	})
+	got := string(page)
+	if !strings.Contains(got, "Lab &lt;Gateway&gt;") || !strings.Contains(got, "FG090422657") {
+		t.Fatalf("device details were not safely injected: %s", got)
+	}
+	if strings.Contains(got, "__XNET_DEVICE_") {
+		t.Fatalf("unresolved device placeholder: %s", got)
+	}
+}
+
 func TestWsNetConnAdapter(t *testing.T) {
 	pr, pw := io.Pipe()
 	defer pr.Close()

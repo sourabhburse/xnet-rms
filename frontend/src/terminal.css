@@ -62,9 +62,13 @@ body {
 .terminal-session-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; color: var(--muted-foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; }
 .meta-label { color: var(--primary); font-size: 9px; font-weight: 700; letter-spacing: .1em; }
 .terminal-surface-wrap { position: relative; margin: 16px; min-height: min(68vh, 680px); border: 1px solid #28364f; border-radius: 8px; background: #0d1420; box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 5px 18px rgba(14, 27, 52, .15); }
+.terminal-device-details { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; border-bottom: 1px solid #28364f; background: #28364f; }
+.terminal-device-details > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; padding: 11px 14px; background: #121c2b; }
+.device-detail-label { color: #8090a8; font-size: 9px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.terminal-device-details strong { overflow: hidden; color: #e7edf9; font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 #terminal { min-height: min(68vh, 680px); padding: 18px; box-sizing: border-box; }
 #terminal .xterm-viewport { border-radius: 4px; }
-.terminal-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; box-sizing: border-box; text-align: center; color: #fff; background: rgba(13, 20, 32, .94); }
+.terminal-state { position: relative; margin: 0 18px 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; box-sizing: border-box; border: 1px solid #354867; border-radius: 8px; text-align: center; color: #fff; background: rgba(22, 34, 53, .96); }
 .terminal-state[hidden] { display: none; }
 .terminal-state-icon { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid rgba(150, 178, 224, .32); border-radius: 14px; color: #b9cdf1; background: rgba(46, 84, 150, .28); font-family: var(--font-mono, ui-monospace, monospace); font-weight: 700; }
 .terminal-state h2 { margin: 16px 0 0; font-size: 17px; }
@@ -83,6 +87,7 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
   .terminal-main { width: min(100% - 20px, 1320px); padding-top: 18px; }
   .terminal-card-header { align-items: flex-start; padding: 15px; }
   .terminal-session-meta { display: none; }
+  .terminal-device-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .terminal-surface-wrap { margin: 10px; min-height: calc(100vh - 190px); }
   #terminal { min-height: calc(100vh - 190px); padding: 10px; }
   .terminal-footer { align-items: flex-start; flex-direction: column; padding: 9px 2px 0; }

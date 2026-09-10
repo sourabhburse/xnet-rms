@@ -285,8 +285,32 @@ func (g *Gateway) close(id string, p *Pair) {
 }
 func (g *Gateway) Reconcile() error { return g.call("POST", "/internal/reconcile", nil, nil) }
 
+func terminalPage(data []byte, session Session) []byte {
+	deviceName := session.DeviceName
+	if deviceName == "" {
+		deviceName = session.DeviceSerial
+	}
+	page := string(data)
+	for placeholder, value := range map[string]string{
+		"__XNET_DEVICE_NAME__":     deviceName,
+		"__XNET_DEVICE_SERIAL__":   session.DeviceSerial,
+		"__XNET_DEVICE_MODEL__":    session.DeviceModel,
+		"__XNET_DEVICE_FIRMWARE__": session.DeviceFirmware,
+	} {
+		page = strings.ReplaceAll(page, placeholder, html.EscapeString(value))
+	}
+	return []byte(page)
+}
+
 func acceptsHTML(r *http.Request) bool {
 	return strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/html")
+}
+
+func (g *Gateway) tunnelLoadingPage(w http.ResponseWriter, r *http.Request) {
+	if acceptsHTML(r) {
+		w.Header().Set("Refresh", "2")
+	}
+	g.tunnelPage(w, r, 503, "CONNECTING", "Connecting to router", "The router is still establishing its secure tunnel. This page will refresh automatically when LuCI is ready.", true)
 }
 
 func (g *Gateway) tunnelPage(w http.ResponseWriter, r *http.Request, status int, eyebrow, title, message string, retry bool) {
@@ -399,6 +423,11 @@ func (g *Gateway) Handler() http.Handler {
 		g.mu.Lock()
 		p := g.pairs[id]
 		g.mu.Unlock()
+		if p == nil && session.Protocol == "SSH_LUCI" && r.URL.Path == "/" && acceptsHTML(r) {
+			w.Header().Set("Retry-After", "2")
+			g.tunnelLoadingPage(w, r)
+			return
+		}
 		if r.URL.Path == "/close" {
 			if r.Method != http.MethodPost {
 				w.WriteHeader(http.StatusMethodNotAllowed)
@@ -428,7 +457,7 @@ func (g *Gateway) Handler() http.Handler {
 		if session.Protocol == "SSH_LUCI" {
 			if p == nil {
 				w.Header().Set("Retry-After", "2")
-				g.tunnelPage(w, r, 503, "CONNECTING", "Connecting to router", "The router is still establishing its secure tunnel. Try again in a moment.", true)
+				g.tunnelLoadingPage(w, r)
 				return
 			}
 			g.luci(w, r, id, p)
@@ -463,13 +492,13 @@ func (g *Gateway) Handler() http.Handler {
 				return
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write(data)
+			w.Write(terminalPage(data, session))
 			return
 		}
 		if p == nil {
 			log.Printf("rms tunnel session %s has no router pair path=%s", id, r.URL.Path)
 			w.Header().Set("Retry-After", "2")
-			g.tunnelPage(w, r, 503, "CONNECTING", "Connecting to router", "The router is still establishing its secure tunnel. Try again in a moment.", true)
+			g.tunnelLoadingPage(w, r)
 			return
 		}
 		g.proxy(w, r, id, p)

@@ -32,9 +32,15 @@
                 <p>Interactive shell through an encrypted XNET RMS tunnel.</p>
               </div>
             </div>
-            <div class="terminal-session-meta"><span class="meta-label">SESSION</span><span id="session-host">Secure tunnel</span></div>
+            <div class="terminal-session-meta"><span class="meta-label">SESSION</span><span id="session-host">__XNET_DEVICE_NAME__</span><span id="session-serial">__XNET_DEVICE_SERIAL__</span></div>
           </div>
           <div class="terminal-surface-wrap">
+            <div class="terminal-device-details">
+              <div><span class="device-detail-label">Device</span><strong id="device-name">__XNET_DEVICE_NAME__</strong></div>
+              <div><span class="device-detail-label">Serial number</span><strong id="device-serial">__XNET_DEVICE_SERIAL__</strong></div>
+              <div><span class="device-detail-label">Model</span><strong id="device-model">__XNET_DEVICE_MODEL__</strong></div>
+              <div><span class="device-detail-label">Firmware</span><strong id="device-firmware">__XNET_DEVICE_FIRMWARE__</strong></div>
+            </div>
             <div id="terminal" aria-label="Interactive remote terminal"></div>
             <div id="terminal-state" class="terminal-state" hidden>
               <div class="terminal-state-icon" aria-hidden="true">&gt;_</div>
