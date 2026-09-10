@@ -146,6 +146,28 @@ func TestTunnelPageKeepsJSONForNonDocumentRequests(t *testing.T) {
 	}
 }
 
+func TestTunnelLoadingPageUsesBreathingFourCircleLogo(t *testing.T) {
+	g := &Gateway{}
+	r := httptest.NewRequest(http.MethodGet, "https://session.rms.example/", nil)
+	r.Header.Set("Accept", "text/html,application/xhtml+xml")
+	w := httptest.NewRecorder()
+
+	g.tunnelLoadingPage(w, r)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+	body := w.Body.String()
+	for _, want := range []string{`class="mark loading"`, "@keyframes breathe", "prefers-reduced-motion:reduce"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("loading page does not contain %q", want)
+		}
+	}
+	if got := strings.Count(body, "<i></i>"); got != 4 {
+		t.Fatalf("logo circle count = %d, want 4", got)
+	}
+}
+
 func TestTerminalPageInjectsEscapedDeviceDetails(t *testing.T) {
 	page := terminalPage([]byte(`<strong id="device-name">__XNET_DEVICE_NAME__</strong><span>__XNET_DEVICE_SERIAL__</span>`), Session{
 		DeviceName:   "Lab <Gateway>",
