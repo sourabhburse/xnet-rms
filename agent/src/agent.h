@@ -100,6 +100,7 @@ void handle_sysupgrade(const char *url, const char *sha256);
 
 // Remote Access Tunnel (router-login LuCI & Dropbear SSH Bridge)
 int open_reverse_tunnel(const char *session_id, const char *protocol, const char *gateway_url, int ttl_seconds, const char *public_key);
+int extend_reverse_tunnel_session(const char *session_id, int ttl_seconds);
 void check_reverse_tunnel(void);
 void close_reverse_tunnel(void);
 int close_reverse_tunnel_session(const char *session_id);

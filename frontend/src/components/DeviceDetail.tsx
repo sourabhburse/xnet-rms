@@ -46,10 +46,11 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 interface DeviceDetailProps {
   device: Device;
   user: User;
-  sessions: SessionItem[];
-  tags?: TagItem[];
   onBack: () => void;
   onRefreshDevice: () => void;
+  sessions?: SessionItem[];
+  onRefreshSessions?: () => void | Promise<void>;
+  tags?: TagItem[];
 }
 
 type NoticeType = "success" | "warning" | "info" | "error";
@@ -169,10 +170,11 @@ function MetricCard({
 export default function DeviceDetail({
   device,
   user,
-  sessions,
-  tags = [],
   onBack,
   onRefreshDevice,
+  sessions = [],
+  onRefreshSessions,
+  tags = [],
 }: DeviceDetailProps) {
   const [snapshots, setSnapshots] = useState<SnapshotSource[]>([]);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
@@ -181,7 +183,7 @@ export default function DeviceDetail({
   const [historyData, setHistoryData] = useState<HistoryRow[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
-  const [closingSessionID, setClosingSessionID] = useState<string | null>(null);
+  const [sessionActionId, setSessionActionId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
@@ -191,11 +193,21 @@ export default function DeviceDetail({
     message: string;
     launchUrl?: string;
     sessionId?: string;
+    expiresAt?: string;
   } | null>(null);
 
   const isSuperAdmin = user.role === "SUPER_ADMIN";
   const canOperate = user.role !== "VIEWER";
   const canAdmin = user.role === "ORG_ADMIN" || user.role === "SUPER_ADMIN";
+  const activeSessions = sessions.filter((session) => session.device_id === device.id && !session.closed_at);
+  const localSessionActive = Boolean(
+    sessionNotice?.sessionId &&
+    (!sessionNotice.expiresAt || Date.parse(sessionNotice.expiresAt) > Date.now()) &&
+    !activeSessions.some((session) => session.id === sessionNotice.sessionId)
+  );
+  const sessionCount = activeSessions.length + (
+    localSessionActive ? 1 : 0
+  );
 
   const loadSnapshots = async () => {
     setLoadingSnapshots(true);
@@ -245,7 +257,9 @@ export default function DeviceDetail({
         message: protocol === "SSH_LUCI" ? "LuCI is opening in a new tab. Sign in with the router administrator credentials when prompted." : "The web terminal is opening in a new tab.",
         launchUrl: res.launch_url,
         sessionId: res.id,
+        expiresAt: res.expires_at,
       });
+      void onRefreshSessions?.();
     } catch (err) {
       const formatted = formatApiError(err);
       setSessionNotice({ type: formatted.type as NoticeType, title: formatted.title, message: formatted.message });
@@ -263,10 +277,6 @@ export default function DeviceDetail({
   }));
 
   const latestSources = snapshots.length ? snapshots : device.sources ?? [];
-  const activeDeviceSessions = useMemo(
-    () => sessions.filter((session) => session.device_id === device.id && !session.closed_at),
-    [sessions, device.id],
-  );
   const metrics = useMemo(() => ({
     rsrp: findMetric(latestSources, ["rsrp"]),
     sinr: findMetric(latestSources, ["sinr"]),
@@ -282,18 +292,29 @@ export default function DeviceDetail({
     registration: findMetric(latestSources, ["registration"]),
   }), [latestSources]);
 
-  const closeSession = async (sessionID = sessionNotice?.sessionId) => {
-    if (!sessionID) return;
-    setClosingSessionID(sessionID);
+  const closeSession = async (sessionId = sessionNotice?.sessionId) => {
+    if (!sessionId) return;
     try {
-      await api(`sessions/${sessionID}`, "DELETE");
-      if (sessionNotice?.sessionId === sessionID) setSessionNotice(null);
+      await api(`sessions/${sessionId}`, "DELETE");
+      if (sessionNotice?.sessionId === sessionId) setSessionNotice(null);
+      void onRefreshSessions?.();
       toast.success("Session closed");
-      void onRefreshDevice();
+    } catch (err) {
+      toast.error(formatApiError(err).message);
+    }
+  };
+
+  const extendSession = async (sessionId: string) => {
+    setSessionActionId(sessionId);
+    try {
+      const result = await api<{ id: string; expires_at: string }>(`sessions/${sessionId}/extend`, "POST");
+      setSessionNotice((notice) => notice?.sessionId === sessionId ? { ...notice, expiresAt: result.expires_at } : notice);
+      void onRefreshSessions?.();
+      toast.success("Session extended by 15 minutes");
     } catch (err) {
       toast.error(formatApiError(err).message);
     } finally {
-      setClosingSessionID(null);
+      setSessionActionId(null);
     }
   };
 
@@ -313,9 +334,7 @@ export default function DeviceDetail({
       await api(`devices/${device.id}/tags/${tag.id}`, assigned ? "DELETE" : "PUT");
       toast.success(assigned ? "Tag removed" : "Tag assigned");
       onRefreshDevice();
-    } catch (err) {
-      toast.error(formatApiError(err).message);
-    }
+    } catch (err) { toast.error(formatApiError(err).message); }
   };
 
   return (
@@ -353,7 +372,7 @@ export default function DeviceDetail({
         <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
           <div className="flex items-start gap-3">
             <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground"><ShieldCheck className="size-4.5" /></div>
-            <div><CardTitle className="text-[14px]">Remote management</CardTitle><CardDescription className="mt-1 max-w-[680px] text-accent-foreground/80">Access the router through the reverse tunnel. Sessions roll back automatically after the 180 s watchdog window.</CardDescription></div>
+            <div><CardTitle className="text-[14px]">Remote management</CardTitle><CardDescription className="mt-1 max-w-[680px] text-accent-foreground/80">Access the router through the reverse tunnel. Sessions start at 15 minutes and can be extended while active.</CardDescription></div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => handleOpenRemote("SSH_LUCI")} disabled={!canOperate || device.status !== "ONLINE" || sessionLoading}><Globe2 className="size-4" />Open LuCI</Button>
@@ -362,12 +381,16 @@ export default function DeviceDetail({
         </CardContent>
       </Card>
 
-      {sessionNotice && <Notice type={sessionNotice.type} title={sessionNotice.title} onClose={() => setSessionNotice(null)}>
+      {sessionNotice && (!sessionNotice.sessionId || localSessionActive) && <Notice type={sessionNotice.type} title={sessionNotice.title} onClose={() => setSessionNotice(null)}>
         <p>{sessionNotice.message}</p>
         {sessionNotice.launchUrl && <div className="mt-2 flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={() => window.open(sessionNotice.launchUrl, "_blank")}><ExternalLink className="size-3.5" />Open session tab</Button>
-          {sessionNotice.sessionId && <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={() => closeSession()}><XCircle className="size-3.5" />Close session</Button>}
+            <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={() => window.open(sessionNotice.launchUrl, "_blank")}><ExternalLink className="size-3.5" />Open session tab</Button>
+          {sessionNotice.sessionId && <>
+            <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={() => extendSession(sessionNotice.sessionId!)} disabled={sessionActionId === sessionNotice.sessionId}>Extend 15 min</Button>
+            <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={() => closeSession()}><XCircle className="size-3.5" />Close session</Button>
+          </>}
         </div>}
+        {sessionNotice.expiresAt && <p className="mt-2 text-xs opacity-80">Expires {new Date(sessionNotice.expiresAt).toLocaleTimeString()}</p>}
       </Notice>}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -375,7 +398,7 @@ export default function DeviceDetail({
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="telemetry">Telemetry <span className="font-mono text-[10.5px] opacity-70">{snapshots.length}</span></TabsTrigger>
           <TabsTrigger value="history"><History className="size-3.5" />History</TabsTrigger>
-          <TabsTrigger value="sessions">Sessions</TabsTrigger>
+          <TabsTrigger value="sessions">Sessions <span className="font-mono text-[10.5px] opacity-70">{sessionCount}</span></TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
@@ -444,7 +467,7 @@ export default function DeviceDetail({
         </TabsContent>
 
         <TabsContent value="sessions" className="mt-4">
-          <Card><CardHeader className="border-b border-border"><CardTitle>Remote sessions</CardTitle><CardDescription>Active sessions currently connected to this device.</CardDescription></CardHeader><CardContent className="p-4">{activeDeviceSessions.length ? <div className="space-y-2">{activeDeviceSessions.map((session) => <div key={session.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ok-border bg-ok-bg p-3"><div className="flex min-w-0 items-center gap-2 text-[12px] text-ok"><CheckCircle2 className="size-4 shrink-0" /><div className="min-w-0"><div className="font-semibold">{session.protocol === "SSH_LUCI" ? "LuCI" : session.protocol === "TERMINAL_SSH" ? "Terminal SSH" : session.protocol} session active</div><div className="truncate font-mono text-[10.5px] opacity-80" title={session.id}>{session.id}</div><div className="text-[10.5px] opacity-80">Expires {session.expires_at ? new Date(session.expires_at).toLocaleString() : "—"}</div></div></div><Button variant="outline" size="sm" disabled={closingSessionID === session.id} onClick={() => closeSession(session.id)}><XCircle className="size-3.5" />{closingSessionID === session.id ? "Closing…" : "Close session"}</Button></div>)}</div> : sessionNotice?.sessionId ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ok-border bg-ok-bg p-3"><div className="flex items-center gap-2 text-[12px] text-ok"><CheckCircle2 className="size-4" /><span>Session {sessionNotice.sessionId.slice(0, 12)}… is active.</span></div><Button variant="outline" size="sm" disabled={closingSessionID === sessionNotice.sessionId} onClick={() => closeSession()}><XCircle className="size-3.5" />Close session</Button></div> : <div className="flex flex-col items-center justify-center gap-2 py-8 text-center"><Code2 className="size-6 text-muted-foreground/60" /><p className="text-[13px] font-medium">No active session</p><p className="max-w-[420px] text-xs text-muted-foreground">Start LuCI or a terminal session from the remote management card above.</p></div>}</CardContent></Card>
+          <Card><CardHeader className="border-b border-border"><CardTitle>Remote sessions</CardTitle><CardDescription>Active sessions connected to this device.</CardDescription></CardHeader><CardContent className="space-y-2 p-4">{localSessionActive ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ok-border bg-ok-bg p-3"><div><div className="flex items-center gap-2 text-[12px] text-ok"><CheckCircle2 className="size-4" /><span>Session {sessionNotice!.sessionId!.slice(0, 12)}… is active.</span></div>{sessionNotice!.expiresAt && <p className="mt-1 pl-6 text-[11px] text-ok/80">Expires {new Date(sessionNotice!.expiresAt).toLocaleTimeString()}</p>}</div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => extendSession(sessionNotice!.sessionId!)} disabled={sessionActionId === sessionNotice!.sessionId}>Extend 15 min</Button><Button variant="outline" size="sm" onClick={() => closeSession()}><XCircle className="size-3.5" />Close session</Button></div></div> : activeSessions.length ? activeSessions.map((session) => <div key={session.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ok-border bg-ok-bg p-3"><div><div className="flex items-center gap-2 text-[12px] text-ok"><CheckCircle2 className="size-4" /><span>{session.protocol === "TERMINAL_SSH" ? "Terminal" : "LuCI"} session {session.id.slice(0, 12)}… is active.</span></div><p className="mt-1 pl-6 text-[11px] text-ok/80">Expires {new Date(session.expires_at).toLocaleTimeString()}</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => extendSession(session.id)} disabled={sessionActionId === session.id}>Extend 15 min</Button><Button variant="outline" size="sm" onClick={() => closeSession(session.id)}><XCircle className="size-3.5" />Close session</Button></div></div>) : <div className="flex flex-col items-center justify-center gap-2 py-8 text-center"><Code2 className="size-6 text-muted-foreground/60" /><p className="text-[13px] font-medium">No active session</p><p className="max-w-[420px] text-xs text-muted-foreground">Start LuCI or a terminal session from the remote management card above.</p></div>}</CardContent></Card>
         </TabsContent>
       </Tabs>
 

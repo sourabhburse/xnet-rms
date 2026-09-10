@@ -28,6 +28,12 @@ type Session struct {
 	SSHSigner     ssh.Signer `json:"-"`
 }
 
+const (
+	initialSessionTTL  = 15 * time.Minute
+	sessionExtension   = 15 * time.Minute
+	maxSessionLifetime = 60 * time.Minute
+)
+
 func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DeviceID string `json:"device_id"`
@@ -46,7 +52,7 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 	a := actor(r)
 	id, ticket := randomID(), secret()
-	expires := time.Now().Add(15 * time.Minute)
+	expires := time.Now().Add(initialSessionTTL)
 	needsSSH := req.Protocol == "TERMINAL_SSH" || req.Protocol == "SSH_LUCI"
 	var pubSSH string
 	var privPEM []byte
@@ -141,6 +147,93 @@ func (s *Core) sessions(w http.ResponseWriter, r *http.Request) {
 	org, ok := scopedOrganization(r, a)
 	if !ok { fail(w, 400, "invalid organization"); return }
 	s.rows(w, `SELECT row_to_json(t) FROM (SELECT s.id,s.device_id,s.user_id,s.protocol,s.expires_at,s.closed_at FROM sessions s JOIN devices d ON d.id=s.device_id WHERE ($1='' OR d.organization_id=$1) AND s.closed_at IS NULL ORDER BY s.created_at DESC) t`, org)
+}
+
+// extendSession adds one bounded extension to an active remote session. The
+// total lifetime is capped so an abandoned browser or router tunnel cannot be
+// kept alive indefinitely. The router receives the same absolute expiry so its
+// local tunnel watchdog stays in sync with the database and gateway.
+func (s *Core) extendSession(w http.ResponseWriter, r *http.Request) {
+	a := actor(r)
+	id := r.PathValue("id")
+
+	var device, owner, org string
+	var oldExpiry, createdAt time.Time
+	e := s.DB.QueryRow(`SELECT s.device_id,s.user_id,s.expires_at,s.created_at,d.organization_id
+		FROM sessions s JOIN devices d ON d.id=s.device_id
+		WHERE s.id=$1 AND s.closed_at IS NULL`, id).Scan(&device, &owner, &oldExpiry, &createdAt, &org)
+	if e != nil || !s.scopedDevice(r, device) {
+		fail(w, 404, "session not found")
+		return
+	}
+	if a.Role == "OPERATOR" && a.ID != owner {
+		fail(w, 403, "only owner or administrator may extend session")
+		return
+	}
+
+	now := time.Now()
+	if !oldExpiry.After(now) {
+		fail(w, 409, "session expired")
+		return
+	}
+	newExpiry := oldExpiry.Add(sessionExtension)
+	maxExpiry := createdAt.Add(maxSessionLifetime)
+	if newExpiry.After(maxExpiry) {
+		newExpiry = maxExpiry
+	}
+	if !newExpiry.After(oldExpiry) {
+		fail(w, 409, "session maximum duration reached")
+		return
+	}
+
+	tx, e := s.DB.Begin()
+	if e != nil {
+		fail(w, 503, "sessions unavailable")
+		return
+	}
+	defer tx.Rollback()
+	var currentExpiry time.Time
+	e = tx.QueryRow(`SELECT expires_at FROM sessions WHERE id=$1 AND closed_at IS NULL FOR UPDATE`, id).Scan(&currentExpiry)
+	if e != nil || !currentExpiry.After(now) {
+		fail(w, 409, "session expired")
+		return
+	}
+	// Recalculate from the row locked above so concurrent extension requests
+	// cannot overwrite one another or exceed the lifetime cap.
+	newExpiry = currentExpiry.Add(sessionExtension)
+	if newExpiry.After(maxExpiry) {
+		newExpiry = maxExpiry
+	}
+	if !newExpiry.After(currentExpiry) {
+		fail(w, 409, "session maximum duration reached")
+		return
+	}
+	if _, e = tx.Exec("UPDATE sessions SET expires_at=$1 WHERE id=$2", newExpiry, id); e != nil {
+		fail(w, 503, "session extension failed")
+		return
+	}
+	if e = audit(tx, org, a.ID, "session.extend", id); e != nil {
+		fail(w, 503, "session extension failed")
+		return
+	}
+	if e = tx.Commit(); e != nil {
+		fail(w, 503, "session extension failed")
+		return
+	}
+
+	command := map[string]any{"action": "extend_session", "session_id": id, "expires_at": newExpiry.Unix()}
+	if s.Publish == nil || s.Publish("rms/v1/devices/"+device+"/commands", command) != nil {
+		// Keep the database and router watchdog aligned when the broker cannot
+		// accept the extension. A concurrent extension is left untouched.
+		_, _ = s.DB.Exec("UPDATE sessions SET expires_at=$1 WHERE id=$2 AND closed_at IS NULL AND expires_at=$3", currentExpiry, id, newExpiry)
+		fail(w, 503, "session extension dispatch failed")
+		return
+	}
+	output(w, 200, map[string]any{
+		"id":             id,
+		"expires_at":     newExpiry,
+		"max_expires_at": maxExpiry,
+	})
 }
 func (s *Core) closeSession(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)

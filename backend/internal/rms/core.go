@@ -149,6 +149,7 @@ func (s *Core) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/audit-logs", s.protect("ORG_ADMIN", s.auditLogs))
 	m.HandleFunc("POST /api/v1/sessions", s.protect("OPERATOR", s.createSession))
 	m.HandleFunc("GET /api/v1/sessions", s.protect("OPERATOR", s.sessions))
+	m.HandleFunc("POST /api/v1/sessions/{id}/extend", s.protect("OPERATOR", s.extendSession))
 	m.HandleFunc("DELETE /api/v1/sessions/{id}", s.protect("OPERATOR", s.closeSession))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")

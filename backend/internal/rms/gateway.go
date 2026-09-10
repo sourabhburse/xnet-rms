@@ -416,6 +416,11 @@ func (g *Gateway) Handler() http.Handler {
 			g.tunnelPage(w, r, 403, "AUTHORIZATION REQUIRED", "Remote session not claimed", "Open the original launch link to authorize this browser session before loading the router interface.", false)
 			return
 		}
+		// Keep the browser cookie aligned with the extended session expiry while
+		// LuCI remains open in another tab.
+		if maxAge := int(time.Until(session.ExpiresAt).Seconds()); maxAge > 0 {
+			http.SetCookie(w, &http.Cookie{Name: "__Host-rms_session", Value: cookie.Value, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
+		}
 		if origin := r.Header.Get("Origin"); origin != "" {
 			expected := "https://" + r.Host
 			if !tunnelOriginAllowed(g.Config.PublicURL, r.Host, origin, session.Protocol == "SSH_LUCI") {

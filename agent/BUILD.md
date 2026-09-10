@@ -1,4 +1,4 @@
-# Agent 2.0.0-1
+# Agent 2.3.0-1
 
 Build from the repository root using the existing OpenWrt staging libraries and
 GCC 7.5.0 MIPS musl toolchain. The script reads that tree and writes only to a
@@ -8,7 +8,7 @@ temporary build directory and the requested artifact directory:
 OPENWRT_ROOT=/home/sourabh/openwrt-19.07 sh agent/scripts/build-mips.sh
 ```
 
-Outputs are in `artifacts/agent-2.0.0/`: IPK, stripped binary, unstripped binary,
+Outputs are in `artifacts/agent-2.3.0/`: IPK, stripped binary, unstripped binary,
 ELF metadata and SHA256 checksums. The IPK is assembled with OpenWrt's
 `ipkg-build` after cross-compilation; this is not a complete firmware build.
 For feed builds, use `agent/Makefile` and the target firmware's dependency resolver.
@@ -25,15 +25,16 @@ For feed builds, use `agent/Makefile` and the target firmware's dependency resol
   short-lived rpcd LuCI sessions and a terminal PTY.
 - Fixed architecture parsing and removed shared demo identity/firmware defaults.
 - Disabled-by-default service; installation-specific trust is never packaged.
-- StrongSwan swanctl collector at `/usr/libexec/xnet-rms/ipsec.lua`. It requires
-  Lua and `luci.jsonc` or `cjson`, plus swanctl. Unsupported implementations need
-  another approved collector. Publish this script as a signed bundle and assign
-  the profile in `collectors/ipsec/profile.json` to activate collection.
+- Approved built-in overview, StrongSwan, and optional Modbus health
+  collectors at `/usr/libexec/xnet-rms/device-overview.sh`,
+  `/usr/libexec/xnet-rms/ipsec.lua`, and
+  `/usr/libexec/xnet-rms/modbus-health.sh`. Capability-specific collectors
+  return the bounded `unsupported` state when their subsystem is absent.
 
 ## Verification
 
 Cross-compilation succeeded for big-endian MIPS32r2, musl soft-float. The stripped
-binary is 70,624 bytes; the IPK is 32,413 bytes. Neither size includes dependencies.
+binary is 82,688 bytes; the IPK is 41,994 bytes. Neither size includes dependencies.
 ELF inspection found no development RPATH. IPK control metadata and contents were
 extracted and inspected.
 

@@ -368,6 +368,7 @@ export default function App() {
                 onBack={() => goToView('devices')}
                 onRefreshDevice={refreshData}
                 sessions={sessions}
+                onRefreshSessions={refreshData}
                 tags={tags}
               />
             ) : (

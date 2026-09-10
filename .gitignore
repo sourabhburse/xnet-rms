@@ -16,6 +16,10 @@ artifacts/*/SHA256SUMS
 artifacts/*/IPKG_BUILD.*/
 artifacts/rms-server-smoke
 artifacts/rms-ws-proxy
-docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/specs/
+.playwright-mcp/
+rms-proxy
 /graphify-out/
 .graphify_detect.json
+.superpowers/

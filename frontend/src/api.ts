@@ -49,6 +49,20 @@ export function formatApiError(err: unknown): { title: string; message: string; 
     }
 
     if (err.status === 409) {
+      if (msg.includes('session maximum duration')) {
+        return {
+          title: 'Maximum Session Duration Reached',
+          message: 'This session has already reached its one-hour maximum. Close it and open a new session if you still need access.',
+          type: 'warning',
+        };
+      }
+      if (msg.includes('session expired')) {
+        return {
+          title: 'Session Expired',
+          message: 'This remote session has expired. Open a new session to continue.',
+          type: 'warning',
+        };
+      }
       if (msg.includes('router busy')) {
         return {
           title: 'Router Busy',

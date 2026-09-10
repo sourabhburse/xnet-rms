@@ -8,23 +8,8 @@ The hosted test endpoints are:
 - MQTT: `xnet-rms-test.duckdns.org:8883`
 - Tunnel ingress: `https://xnet-rms-test.duckdns.org:9443`
 - VPS SSH: `ubuntu@82.180.146.203`, port `8022`
-- Workstation key (PuTTY format): `/home/sourabh/Niseva/Aashish_Sir/contabo-in-ubuntu.ppk`
-- VPS build root: `/home/ubuntu/xnet-rms-builds`
 
 Do not put passwords, private keys, enrollment tokens, database URLs, or certificate authority material in this repository or in command output.
-
-### SSH key setup
-
-The Contabo key is kept outside the repository at `/home/sourabh/Niseva/Aashish_Sir/contabo-in-ubuntu.ppk`. OpenSSH cannot use the PuTTY file directly, so convert it once per workstation session to a temporary OpenSSH key:
-
-```bash
-PPK_KEY=/home/sourabh/Niseva/Aashish_Sir/contabo-in-ubuntu.ppk
-OPENSSH_KEY=/tmp/xnet-contabo-openssh
-puttygen "$PPK_KEY" -O private-openssh-new -o "$OPENSSH_KEY"
-chmod 600 "$OPENSSH_KEY"
-```
-
-Never commit either key. The temporary `/tmp` copy may be removed after the deployment session.
 
 ## 1. Prepare and push the change
 
@@ -72,21 +57,13 @@ Do not add `.playwright-mcp/`, local proxies, credentials, private keys, router 
 
 ## 2. Pull and build on the VPS
 
-The VPS SSH key must be prepared as shown above. Set the connection variables once:
+The VPS SSH key must already be available to the operator. With ordinary OpenSSH, set the key path for the current machine; in Codex, the `rtk ssh` wrapper may be used instead.
 
 ```bash
-VPS_KEY=/tmp/xnet-contabo-openssh
+VPS_KEY=/path/to/contabo-openssh-key
 VPS=ubuntu@82.180.146.203
 VPS_PORT=8022
 ssh -i "$VPS_KEY" -p "$VPS_PORT" "$VPS" \
-  'cd /home/ubuntu/xnet-rms-repo && git pull --ff-only origin dev'
-```
-
-When using the Codex terminal, prefix the same command with `rtk`:
-
-```bash
-rtk ssh -F /dev/null -oBatchMode=yes -oStrictHostKeyChecking=no \
-  -i "$VPS_KEY" -p "$VPS_PORT" "$VPS" \
   'cd /home/ubuntu/xnet-rms-repo && git pull --ff-only origin dev'
 ```
 
@@ -99,23 +76,23 @@ npm --prefix frontend run build
 rm -rf backend/cmd/server/dist
 cp -a frontend/dist backend/cmd/server/dist
 
-mkdir -p /home/ubuntu/xnet-rms-builds/rms-build-<commit>
+mkdir -p /home/ubuntu/rms-build-<commit>
 cd backend
 /home/ubuntu/go/bin/go test ./...
 /home/ubuntu/go/bin/go build \
-  -o /home/ubuntu/xnet-rms-builds/rms-build-<commit>/xnet-rms-server-<commit> \
+  -o /home/ubuntu/rms-build-<commit>/xnet-rms-server-<commit> \
   ./cmd/server
-sha256sum /home/ubuntu/xnet-rms-builds/rms-build-<commit>/xnet-rms-server-<commit>
+sha256sum /home/ubuntu/rms-build-<commit>/xnet-rms-server-<commit>
 ```
 
-Replace `<commit>` with the full or short commit identifier. All new build directories belong under `/home/ubuntu/xnet-rms-builds`; do not create new `rms-build-*` directories directly in `/home/ubuntu`. Record the checksum before installation so the operator can verify the exact artifact. If the Go toolchain is not at `/home/ubuntu/go/bin/go`, stop and provision the approved toolchain before continuing.
+Replace `<commit>` with the full or short commit identifier. Record the checksum before installation so the operator can verify the exact artifact. If the Go toolchain is not at `/home/ubuntu/go/bin/go`, stop and provision the approved toolchain before continuing.
 
 ## 3. Install the binary and restart services
 
 The SSH account normally cannot run `sudo` without the operator's password. Run this final step interactively on the VPS, using the checksum printed in the previous step:
 
 ```bash
-cd /home/ubuntu/xnet-rms-builds/rms-build-<commit>
+cd /home/ubuntu/rms-build-<commit>
 sha256sum xnet-rms-server-<commit>
 
 # Compare the checksum with the build output before continuing.
