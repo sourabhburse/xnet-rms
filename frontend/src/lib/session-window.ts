@@ -4,7 +4,7 @@ const SESSION_WINDOW_STYLE = `
   main { display: grid; justify-items: center; gap: 16px; padding: 32px; text-align: center; }
   .mark { display: block; width: 36px; height: 24px; animation: breathe 1.2s ease-in-out infinite; }
   @keyframes breathe { 0%, 100% { opacity: .4; transform: scale(.85); } 50% { opacity: 1; transform: scale(1); } }
-  @media (prefers-reduced-motion: reduce) { .mark i { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .mark { animation: none; } }
 `;
 
 export function openSessionWindow(label: string): Window | null {

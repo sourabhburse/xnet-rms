@@ -424,7 +424,7 @@ Please change the parent <Route path="${y}"> to <Route path="${y==="/"?"*":`${y}
   main { display: grid; justify-items: center; gap: 16px; padding: 32px; text-align: center; }
   .mark { display: block; width: 36px; height: 24px; animation: breathe 1.2s ease-in-out infinite; }
   @keyframes breathe { 0%, 100% { opacity: .4; transform: scale(.85); } 50% { opacity: 1; transform: scale(1); } }
-  @media (prefers-reduced-motion: reduce) { .mark i { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .mark { animation: none; } }
 `;function Ox(e){const t=window.open("about:blank","_blank");if(!t)return null;t.document.title=`XNET RMS - ${e}`,t.document.body.innerHTML=`
     <main>
       <svg viewBox="0 0 62 24" role="img" aria-label="XNET" class="mark" xmlns="http://www.w3.org/2000/svg">
