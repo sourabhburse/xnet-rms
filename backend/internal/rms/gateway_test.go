@@ -120,7 +120,7 @@ func TestTunnelPageRendersHTMLForDocumentRequests(t *testing.T) {
 		t.Fatalf("content type = %q", got)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"XNET RMS", "Remote session ended", "The secure tunnel closed", "Open XNET RMS", "Close tab"} {
+	for _, want := range []string{"XNET RMS", "Remote session ended", "The secure tunnel closed", "Open XNET RMS", "Close tab", "min-width:122px", "min-height:38px"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("HTML page does not contain %q", want)
 		}
