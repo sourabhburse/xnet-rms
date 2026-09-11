@@ -107,6 +107,7 @@ func (s *Core) Handler() http.Handler {
 	m.HandleFunc("GET /internal/sessions/{id}", s.internalSession)
 	m.HandleFunc("POST /internal/sessions/{id}/close", s.internalClose)
 	m.HandleFunc("POST /internal/sessions/{id}/claim", s.internalClaim)
+	m.HandleFunc("POST /internal/sessions/{id}/extend", s.internalExtend)
 	m.HandleFunc("POST /internal/reconcile", s.internalReconcile)
 	m.HandleFunc("GET /api/v1/auth/me", s.protect("VIEWER", func(w http.ResponseWriter, r *http.Request) { output(w, 200, actor(r)) }))
 	m.HandleFunc("GET /api/v1/devices", s.protect("VIEWER", s.listDevices))

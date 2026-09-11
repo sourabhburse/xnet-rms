@@ -28,6 +28,7 @@ const connectionBadge = document.getElementById("connection-badge")!;
 const connectionLabel = document.getElementById("connection-label")!;
 const sessionExpiry = document.getElementById("session-expiry")!;
 const sessionExpiryValue = document.getElementById("session-expiry-value")!;
+const sessionExtend = document.getElementById("session-extend") as HTMLButtonElement;
 
 terminal.open(terminalElement);
 let socket: WebSocket | null = null;
@@ -102,6 +103,31 @@ const refreshSessionExpiry = async () => {
   }
 };
 
+const extendSession = async () => {
+  if (sessionEnded || sessionExtend.disabled) return;
+  sessionExtend.disabled = true;
+  sessionExtend.textContent = "Extending…";
+  try {
+    const response = await fetch("/__rms/session-extend", { method: "POST", cache: "no-store", credentials: "same-origin" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.expires_at) throw new Error("extension unavailable");
+    const nextExpiry = Date.parse(payload.expires_at);
+    if (!Number.isFinite(nextExpiry)) throw new Error("invalid expiry");
+    sessionExpiresAt = nextExpiry;
+    sessionExtend.textContent = "Extended";
+    renderSessionExpiry();
+  } catch (_) {
+    sessionExtend.textContent = "Try again";
+  } finally {
+    window.setTimeout(() => {
+      if (!sessionEnded) {
+        sessionExtend.disabled = false;
+        sessionExtend.textContent = "Extend 15 min";
+      }
+    }, 1500);
+  }
+};
+
 const closeWindow = () => {
   window.close();
   stateMessage.textContent = "This tab can now be closed.";
@@ -144,6 +170,7 @@ window.setInterval(renderSessionExpiry, 1000);
 window.setInterval(refreshSessionExpiry, 5000);
 void refreshSessionExpiry();
 terminal.onData(data => { if (socket && socket.readyState === WebSocket.OPEN) socket.send(data); });
+sessionExtend.addEventListener("click", () => { void extendSession(); });
 retryButton.addEventListener("click", () => {
   attempts = 0;
   connect();

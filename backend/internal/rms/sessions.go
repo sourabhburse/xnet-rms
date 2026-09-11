@@ -1,6 +1,7 @@
 package rms
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"database/sql"
@@ -420,6 +421,23 @@ func (s *Core) internalClaim(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+
+func (s *Core) internalExtend(w http.ResponseWriter, r *http.Request) {
+	if !internalOK(r) {
+		fail(w, 403, "service certificate required")
+		return
+	}
+	var a Actor
+	e := s.DB.QueryRow(`SELECT u.id,coalesce(u.organization_id,''),u.email,u.role
+		FROM sessions s JOIN users u ON u.id=s.user_id JOIN devices d ON d.id=s.device_id
+		WHERE s.id=$1 AND s.closed_at IS NULL AND s.expires_at>now() AND NOT d.revoked AND NOT u.disabled`, r.PathValue("id")).Scan(&a.ID, &a.Org, &a.Email, &a.Role)
+	if e != nil {
+		fail(w, 403, "session inactive")
+		return
+	}
+	s.extendSession(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, a)))
+}
+
 func (s *Core) internalClose(w http.ResponseWriter, r *http.Request) {
 	if !internalOK(r) {
 		fail(w, 403, "service certificate required")
