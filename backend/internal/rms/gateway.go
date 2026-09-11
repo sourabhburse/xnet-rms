@@ -230,6 +230,7 @@ const luciSessionChromeTemplate = `
     }
   };
   extendButton.addEventListener("click", (event) => {
+    event.preventDefault();
     event.stopPropagation();
     void extendSession();
   });
