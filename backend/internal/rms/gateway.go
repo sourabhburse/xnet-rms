@@ -138,18 +138,17 @@ func injectLuciLoadingFallback(body []byte) []byte {
 
 const luciSessionChromeTemplate = `
 <style id="xnet-rms-session-style">
-#xnet-rms-session-indicator{--session-progress:1;position:fixed;right:16px;bottom:16px;z-index:2147483647;display:flex;min-width:116px;max-width:calc(100vw - 32px);flex-direction:column;padding:2px;border:2px solid transparent;border-radius:13px;background:linear-gradient(#fff,#fff) padding-box,conic-gradient(#3f6bb0 calc(var(--session-progress)*1turn),#dce4f0 0) border-box;box-shadow:0 8px 24px rgba(32,56,100,.18);font:12px/1.3 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-#xnet-rms-session-indicator .xnet-rms-session-toggle{display:flex;align-items:center;gap:7px;border:0;border-radius:9px;padding:5px 7px;color:#203864;background:#fff;font:inherit;text-align:left;cursor:pointer}
-#xnet-rms-session-indicator .xnet-rms-session-toggle:hover{background:#f4f7fb}
-#xnet-rms-session-indicator .xnet-rms-session-ring{display:grid;width:30px;height:30px;flex:0 0 auto;place-items:center;border-radius:50%;padding:2px;background:conic-gradient(#3f6bb0 calc(var(--session-progress)*1turn),#dce4f0 0)}
-#xnet-rms-session-indicator .xnet-rms-session-mark{display:block;width:26px;height:26px;border-radius:50%;background:#fff;transform-origin:center;animation:xnet-rms-session-breathe 2s ease-in-out infinite}
+#xnet-rms-session-indicator{--session-progress:1;position:fixed;right:16px;bottom:16px;z-index:2147483647;display:flex;min-width:116px;max-width:calc(100vw - 32px);flex-direction:column;padding:2px;border:2px solid transparent;border-radius:13px;background:linear-gradient(#fff,#fff) padding-box,conic-gradient(#3f6bb0 calc(var(--session-progress)*1turn),#dce4f0 0) border-box;box-shadow:0 8px 24px rgba(32,56,100,.18);font:12px/1.3 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;transition:transform .18s ease,box-shadow .18s ease}
+#xnet-rms-session-indicator:hover,#xnet-rms-session-indicator:focus-within{transform:translateY(-2px);box-shadow:0 12px 28px rgba(32,56,100,.24)}
+#xnet-rms-session-indicator .xnet-rms-session-summary{display:flex;align-items:center;gap:7px;border-radius:9px;padding:5px 7px;color:#203864;background:#fff}
+#xnet-rms-session-indicator .xnet-rms-session-mark{display:block;width:30px;height:16px;flex:0 0 auto;transform-origin:center;animation:xnet-rms-session-breathe 2s ease-in-out infinite}
 #xnet-rms-session-indicator .xnet-rms-session-copy{display:flex;min-width:0;flex-direction:column;gap:1px}
 #xnet-rms-session-indicator .xnet-rms-session-copy strong{font-size:10px;white-space:nowrap}
 #xnet-rms-session-indicator .xnet-rms-session-time{white-space:nowrap;color:#203864;font-family:ui-monospace,monospace;font-size:12px;font-weight:700}
-#xnet-rms-session-indicator .xnet-rms-session-panel{display:none;gap:7px;padding:7px 7px 6px;border-top:1px solid #e5eaf2}
-#xnet-rms-session-indicator[data-expanded="true"] .xnet-rms-session-panel{display:flex;align-items:center;justify-content:space-between}
+#xnet-rms-session-indicator .xnet-rms-session-panel{display:none;align-items:center;justify-content:space-between;gap:7px;padding:6px 7px 5px}
+#xnet-rms-session-indicator:hover .xnet-rms-session-panel,#xnet-rms-session-indicator:focus-within .xnet-rms-session-panel{display:flex}
 #xnet-rms-session-indicator .xnet-rms-session-device{overflow:hidden;color:#687792;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
-#xnet-rms-session-indicator .xnet-rms-session-extend{flex:0 0 auto;border:1px solid #203864;border-radius:6px;padding:5px 7px;color:#fff;background:#203864;font:inherit;font-size:10px;font-weight:600;cursor:pointer}
+#xnet-rms-session-indicator .xnet-rms-session-extend{flex:0 0 auto;border:0;border-radius:6px;padding:5px 7px;color:#fff;background:#203864;font:inherit;font-size:10px;font-weight:600;cursor:pointer}
 #xnet-rms-session-indicator .xnet-rms-session-extend:hover{background:#2e5496}
 #xnet-rms-session-indicator .xnet-rms-session-extend:disabled{cursor:wait;opacity:.6}
 #xnet-rms-session-indicator[data-state="warning"] .xnet-rms-session-time{color:#a15d00}
@@ -157,20 +156,19 @@ const luciSessionChromeTemplate = `
 @media(prefers-reduced-motion:reduce){#xnet-rms-session-indicator .xnet-rms-session-mark{animation:none}}
 @media(max-width:560px){#xnet-rms-session-indicator{right:8px;bottom:8px;min-width:108px}#xnet-rms-session-indicator .xnet-rms-session-device{max-width:120px}}
 </style>
-<div id="xnet-rms-session-indicator" data-expires-at="__XNET_SESSION_EXPIRES_AT__" data-expanded="false" role="region" aria-label="RMS remote session">
-<button id="xnet-rms-session-toggle" class="xnet-rms-session-toggle" type="button" aria-expanded="false" aria-controls="xnet-rms-session-panel">
-<span class="xnet-rms-session-ring"><svg viewBox="0 0 62 24" role="img" aria-label="XNET" class="xnet-rms-session-mark" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" fill="#203864" r="11"></circle><circle cx="24" cy="12" fill="#2e5496" r="11"></circle><circle cx="36" cy="12" fill="#3f6bb0" r="11"></circle><circle cx="48" cy="12" fill="#668bce" r="11"></circle></svg></span>
-<span class="xnet-rms-session-copy"><strong>Session</strong><span id="xnet-rms-session-time" class="xnet-rms-session-time">--:--</span></span>
-</button>
+<div id="xnet-rms-session-indicator" data-expires-at="__XNET_SESSION_EXPIRES_AT__" role="region" aria-label="RMS remote session">
+<div class="xnet-rms-session-summary" aria-label="Session time remaining">
+<span class="xnet-rms-session-logo"><svg viewBox="0 0 62 24" role="img" aria-label="XNET" class="xnet-rms-session-mark" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" fill="#203864" r="11"></circle><circle cx="24" cy="12" fill="#2e5496" r="11"></circle><circle cx="36" cy="12" fill="#3f6bb0" r="11"></circle><circle cx="48" cy="12" fill="#668bce" r="11"></circle></svg></span>
+<span class="xnet-rms-session-copy"><strong>Session</strong><span id="xnet-rms-session-time" class="xnet-rms-session-time" role="status" aria-live="polite">--:--</span></span>
+</div>
 <div id="xnet-rms-session-panel" class="xnet-rms-session-panel"><span class="xnet-rms-session-device">__XNET_DEVICE_NAME_HTML__</span><button id="xnet-rms-session-extend" class="xnet-rms-session-extend" type="button">Extend 15 min</button></div>
 </div>
 <script>
 (() => {
   const indicator = document.getElementById("xnet-rms-session-indicator");
-  const toggle = document.getElementById("xnet-rms-session-toggle");
   const time = document.getElementById("xnet-rms-session-time");
   const extendButton = document.getElementById("xnet-rms-session-extend");
-  if (!indicator || !toggle || !time || !extendButton) return;
+  if (!indicator || !time || !extendButton) return;
   let expiresAt = Number(indicator.dataset.expiresAt || 0);
   let ended = false;
   const homeUrl = __XNET_RMS_HOME__;
@@ -231,11 +229,6 @@ const luciSessionChromeTemplate = `
       }, 1500);
     }
   };
-  toggle.addEventListener("click", () => {
-    const expanded = indicator.dataset.expanded === "true";
-    indicator.dataset.expanded = String(!expanded);
-    toggle.setAttribute("aria-expanded", String(!expanded));
-  });
   extendButton.addEventListener("click", (event) => {
     event.stopPropagation();
     void extendSession();
