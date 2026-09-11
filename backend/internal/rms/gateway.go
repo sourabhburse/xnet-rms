@@ -136,6 +136,121 @@ func injectLuciLoadingFallback(body []byte) []byte {
 	return out
 }
 
+const luciSessionChromeTemplate = `
+<style id="xnet-rms-session-style">
+#xnet-rms-session-indicator{position:fixed;top:12px;right:12px;z-index:2147483647;display:flex;align-items:center;gap:9px;max-width:calc(100vw - 24px);padding:8px 11px;border:1px solid #cbd6e8;border-radius:10px;color:#203864;background:rgba(255,255,255,.97);box-shadow:0 8px 24px rgba(32,56,100,.18);font:12px/1.3 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+#xnet-rms-session-indicator .xnet-rms-session-mark{display:block;width:36px;height:24px;flex:0 0 auto;transform-origin:center;animation:xnet-rms-session-breathe 2s ease-in-out infinite}
+#xnet-rms-session-indicator .xnet-rms-session-copy{display:flex;min-width:0;flex-direction:column;gap:2px}
+#xnet-rms-session-indicator .xnet-rms-session-copy strong{font-size:11px;white-space:nowrap}
+#xnet-rms-session-indicator .xnet-rms-session-copy small{overflow:hidden;color:#687792;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
+#xnet-rms-session-indicator .xnet-rms-session-time{white-space:nowrap;color:#203864;font-size:11px;font-weight:700}
+#xnet-rms-session-indicator[data-state="warning"] .xnet-rms-session-time{color:#a15d00}
+@keyframes xnet-rms-session-breathe{0%,100%{transform:scale(.94);filter:drop-shadow(0 0 0 rgba(102,139,206,0))}50%{transform:scale(1.05);filter:drop-shadow(0 0 8px rgba(102,139,206,.38))}}
+@media(prefers-reduced-motion:reduce){#xnet-rms-session-indicator .xnet-rms-session-mark{animation:none}}
+@media(max-width:560px){#xnet-rms-session-indicator{top:8px;right:8px;padding:7px 9px}#xnet-rms-session-indicator .xnet-rms-session-copy small{max-width:100px}}
+</style>
+<div id="xnet-rms-session-indicator" data-expires-at="__XNET_SESSION_EXPIRES_AT__" role="status" aria-live="polite">
+<svg viewBox="0 0 62 24" role="img" aria-label="XNET" class="xnet-rms-session-mark" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" fill="#203864" r="11"></circle><circle cx="24" cy="12" fill="#2e5496" r="11"></circle><circle cx="36" cy="12" fill="#3f6bb0" r="11"></circle><circle cx="48" cy="12" fill="#668bce" r="11"></circle></svg>
+<span class="xnet-rms-session-copy"><strong>Remote session</strong><small>__XNET_DEVICE_NAME_HTML__ · __XNET_DEVICE_SERIAL_HTML__</small></span>
+<span id="xnet-rms-session-time" class="xnet-rms-session-time">Time remaining: —</span>
+</div>
+<script>
+(() => {
+  const indicator = document.getElementById("xnet-rms-session-indicator");
+  const time = document.getElementById("xnet-rms-session-time");
+  if (!indicator || !time) return;
+  let expiresAt = Number(indicator.dataset.expiresAt || 0);
+  let ended = false;
+  const homeUrl = __XNET_RMS_HOME__;
+  const formatRemaining = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return minutes + ":" + String(remainder).padStart(2, "0");
+  };
+  const showEnded = () => {
+    if (ended) return;
+    ended = true;
+    document.title = "Remote session ended · XNET RMS";
+    const style = document.createElement("style");
+    style.textContent = "#xnet-rms-ended{display:grid;place-items:center;min-height:100vh;padding:24px;box-sizing:border-box;background:radial-gradient(circle at 8% 0%,rgba(102,139,206,.16),transparent 31rem),#f5f6f9;color:#191c23;font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,\"Segoe UI\",sans-serif}#xnet-rms-ended .card{width:min(520px,100%);padding:32px;border:1px solid #e5e7ec;border-radius:14px;background:#fff;box-shadow:0 14px 40px rgba(25,28,35,.08);text-align:center}#xnet-rms-ended .mark{display:block;width:62px;height:24px;margin:0 auto 20px;animation:xnet-rms-ended-breathe 2s ease-in-out infinite}#xnet-rms-ended h1{margin:0;font-size:22px;color:#203864}#xnet-rms-ended p{margin:10px auto 0;max-width:420px;color:#6d7482;font-size:13px}#xnet-rms-ended .details{margin:20px 0 0;padding:12px 14px;border-radius:9px;background:#f5f6f9;color:#6d7482;font-size:12px}#xnet-rms-ended .actions{display:flex;justify-content:center;gap:8px;margin-top:22px;flex-wrap:wrap}#xnet-rms-ended a,#xnet-rms-ended button{display:inline-flex;align-items:center;justify-content:center;border:1px solid #d8dce5;border-radius:7px;padding:9px 13px;color:#203864;background:#fff;font:inherit;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer}#xnet-rms-ended a{border-color:#203864;color:#fff;background:#203864}@keyframes xnet-rms-ended-breathe{0%,100%{transform:scale(.94)}50%{transform:scale(1.05)}}@media(prefers-reduced-motion:reduce){#xnet-rms-ended .mark{animation:none}}";
+    document.head.appendChild(style);
+    document.body.innerHTML = '<main id="xnet-rms-ended"><section class="card"><svg viewBox="0 0 62 24" role="img" aria-label="XNET" class="mark" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" fill="#203864" r="11"></circle><circle cx="24" cy="12" fill="#2e5496" r="11"></circle><circle cx="36" cy="12" fill="#3f6bb0" r="11"></circle><circle cx="48" cy="12" fill="#668bce" r="11"></circle></svg><h1>Remote session ended</h1><p>The secure router tunnel has closed or expired. Your router login was not changed.</p><div class="details"><strong id="xnet-rms-ended-device"></strong><br><span id="xnet-rms-ended-serial"></span></div><div class="actions"><a id="xnet-rms-ended-home" href="#">Open XNET RMS</a><button type="button" onclick="window.close();this.textContent=\'You can close this tab\'">Close tab</button></div></section></main>';
+    document.getElementById("xnet-rms-ended-device").textContent = __XNET_DEVICE_NAME_JSON__;
+    document.getElementById("xnet-rms-ended-serial").textContent = "Serial: " + __XNET_DEVICE_SERIAL_JSON__;
+    const home = document.getElementById("xnet-rms-ended-home");
+    if (homeUrl) home.href = homeUrl;
+    else home.hidden = true;
+  };
+  const renderRemaining = () => {
+    if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+      time.textContent = "Time remaining: unavailable";
+      return;
+    }
+    const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+    if (seconds === 0) {
+      time.textContent = "Expired";
+      indicator.dataset.state = "warning";
+      showEnded();
+      return;
+    }
+    indicator.dataset.state = seconds <= 60 ? "warning" : "active";
+    time.textContent = "Time remaining: " + formatRemaining(seconds);
+  };
+  const refreshSession = async () => {
+    if (ended) return;
+    try {
+      const response = await fetch("/__rms/session-status", { cache: "no-store", credentials: "same-origin" });
+      if (response.status === 403 || response.status === 404) {
+        showEnded();
+        return;
+      }
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!payload.active) {
+        showEnded();
+        return;
+      }
+      const nextExpiry = Date.parse(payload.expires_at);
+      if (Number.isFinite(nextExpiry)) expiresAt = nextExpiry;
+      renderRemaining();
+    } catch (_) {
+      // The local countdown remains authoritative if the tunnel is briefly unreachable.
+    }
+  };
+  renderRemaining();
+  window.setInterval(renderRemaining, 1000);
+  window.setInterval(refreshSession, 5000);
+  void refreshSession();
+})();
+</script>`
+
+func injectLuciSessionChrome(body []byte, session Session, publicURL string) []byte {
+	lower := bytes.ToLower(body)
+	marker := []byte("</body>")
+	idx := bytes.LastIndex(lower, marker)
+	if idx < 0 {
+		return body
+	}
+	deviceName := session.DeviceName
+	if deviceName == "" {
+		deviceName = session.DeviceSerial
+	}
+	deviceJSON, _ := json.Marshal(deviceName)
+	serialJSON, _ := json.Marshal(session.DeviceSerial)
+	homeJSON, _ := json.Marshal(publicURL)
+	chrome := strings.ReplaceAll(luciSessionChromeTemplate, "__XNET_SESSION_EXPIRES_AT__", fmt.Sprintf("%d", session.ExpiresAt.UnixMilli()))
+	chrome = strings.ReplaceAll(chrome, "__XNET_DEVICE_NAME_HTML__", html.EscapeString(deviceName))
+	chrome = strings.ReplaceAll(chrome, "__XNET_DEVICE_SERIAL_HTML__", html.EscapeString(session.DeviceSerial))
+	chrome = strings.ReplaceAll(chrome, "__XNET_DEVICE_NAME_JSON__", string(deviceJSON))
+	chrome = strings.ReplaceAll(chrome, "__XNET_DEVICE_SERIAL_JSON__", string(serialJSON))
+	chrome = strings.ReplaceAll(chrome, "__XNET_RMS_HOME__", string(homeJSON))
+	out := make([]byte, 0, len(body)+len(chrome))
+	out = append(out, body[:idx]...)
+	out = append(out, chrome...)
+	out = append(out, body[idx:]...)
+	return out
+}
+
 func forwardLuciRequestHeaders(src http.Header) http.Header {
 	dst := src.Clone()
 	dst.Del("Connection")
@@ -234,6 +349,7 @@ func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pai
 			log.Printf("rms tunnel session %s LuCI HTML read failed path=%s: %v", id, r.URL.Path, readErr)
 		}
 		body = injectLuciLoadingFallback(body)
+		body = injectLuciSessionChrome(body, p.session, g.Config.PublicURL)
 		w.Header().Del("Content-Length")
 		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(body)
@@ -318,10 +434,11 @@ func terminalPage(data []byte, session Session) []byte {
 	}
 	page := string(data)
 	for placeholder, value := range map[string]string{
-		"__XNET_DEVICE_NAME__":     deviceName,
-		"__XNET_DEVICE_SERIAL__":   session.DeviceSerial,
-		"__XNET_DEVICE_MODEL__":    session.DeviceModel,
-		"__XNET_DEVICE_FIRMWARE__": session.DeviceFirmware,
+		"__XNET_DEVICE_NAME__":         deviceName,
+		"__XNET_DEVICE_SERIAL__":       session.DeviceSerial,
+		"__XNET_DEVICE_MODEL__":        session.DeviceModel,
+		"__XNET_DEVICE_FIRMWARE__":     session.DeviceFirmware,
+		"__XNET_SESSION_EXPIRES_AT__": session.ExpiresAt.Format(time.RFC3339Nano),
 	} {
 		page = strings.ReplaceAll(page, placeholder, html.EscapeString(value))
 	}
@@ -446,6 +563,10 @@ func (g *Gateway) Handler() http.Handler {
 		// LuCI remains open in another tab.
 		if maxAge := int(time.Until(session.ExpiresAt).Seconds()); maxAge > 0 {
 			http.SetCookie(w, &http.Cookie{Name: "__Host-rms_session", Value: cookie.Value, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
+		}
+		if r.URL.Path == "/__rms/session-status" {
+			output(w, http.StatusOK, map[string]any{"active": true, "expires_at": session.ExpiresAt})
+			return
 		}
 		if origin := r.Header.Get("Origin"); origin != "" {
 			expected := "https://" + r.Host

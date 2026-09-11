@@ -182,16 +182,31 @@ func TestInjectLuciLoadingFallback(t *testing.T) {
 	}
 }
 
+func TestInjectLuciSessionChrome(t *testing.T) {
+	body := []byte(`<html><head></head><body><div class="main">LuCI</div></body></html>`)
+	session := Session{DeviceName: "Lab Gateway", DeviceSerial: "FG090422657", ExpiresAt: time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)}
+	got := string(injectLuciSessionChrome(body, session, "https://rms.example:8445"))
+	for _, want := range []string{`id="xnet-rms-session-indicator"`, `Time remaining`, `__rms/session-status`, `Remote session ended`, `Lab Gateway`, `FG090422657`, `viewBox="0 0 62 24"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("session chrome does not contain %q", want)
+		}
+	}
+	if strings.Contains(got, "__XNET_") {
+		t.Fatalf("unresolved session chrome placeholder: %s", got)
+	}
+}
+
 func TestTerminalPageInjectsEscapedDeviceDetails(t *testing.T) {
-	page := terminalPage([]byte(`<strong id="device-name">__XNET_DEVICE_NAME__</strong><span>__XNET_DEVICE_SERIAL__</span>`), Session{
+	page := terminalPage([]byte(`<strong id="device-name">__XNET_DEVICE_NAME__</strong><span>__XNET_DEVICE_SERIAL__</span><span>__XNET_SESSION_EXPIRES_AT__</span>`), Session{
 		DeviceName:   "Lab <Gateway>",
 		DeviceSerial: "FG090422657",
+		ExpiresAt:    time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC),
 	})
 	got := string(page)
 	if !strings.Contains(got, "Lab &lt;Gateway&gt;") || !strings.Contains(got, "FG090422657") {
 		t.Fatalf("device details were not safely injected: %s", got)
 	}
-	if strings.Contains(got, "__XNET_DEVICE_") {
+	if !strings.Contains(got, "2026-09-11T12:00:00Z") || strings.Contains(got, "__XNET_") {
 		t.Fatalf("unresolved device placeholder: %s", got)
 	}
 }

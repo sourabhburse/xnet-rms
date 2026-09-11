@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="theme-color" content="#203864">
     <title>XNET remote terminal</title>
-    <script type="module" crossorigin src="/assets/terminal-CVf6O_rj.js"></script>
+    <script type="module" crossorigin src="/assets/terminal-dt48TW0X.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/globals-GPvxll5k.js">
     <link rel="stylesheet" crossorigin href="/assets/globals-DoTZXXgJ.css">
-    <link rel="stylesheet" crossorigin href="/assets/terminal-Sl2KmiWB.css">
+    <link rel="stylesheet" crossorigin href="/assets/terminal-BC1D99uH.css">
   </head>
   <body>
     <div class="terminal-app">
@@ -21,6 +21,7 @@
           </div>
         </div>
         <div class="terminal-header-actions">
+          <div id="session-expiry" class="session-expiry" data-expires-at="__XNET_SESSION_EXPIRES_AT__" aria-live="polite"><span class="session-expiry-label">Time remaining</span><strong id="session-expiry-value">—</strong></div>
           <div id="connection-badge" class="connection-badge" data-state="connecting"><span class="connection-dot"></span><span id="connection-label">Connecting</span></div>
           <button id="close-window" class="terminal-close" type="button">Close tab</button>
         </div>
@@ -57,7 +58,7 @@
             </div>
           </div>
         </section>
-        <div class="terminal-footer"><span><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd> closes the tab</span><span>Sessions expire automatically after the watchdog window.</span></div>
+        <div class="terminal-footer"><span><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd> closes the tab</span><span>Session time remaining is shown above.</span></div>
       </main>
     </div>
   </body>
