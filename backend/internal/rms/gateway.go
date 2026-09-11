@@ -449,14 +449,18 @@ func acceptsHTML(r *http.Request) bool {
 	return strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/html")
 }
 
-func (g *Gateway) tunnelLoadingPage(w http.ResponseWriter, r *http.Request) {
+func (g *Gateway) tunnelLoadingPage(w http.ResponseWriter, r *http.Request, expiresAt time.Time) {
 	if acceptsHTML(r) {
 		w.Header().Set("Refresh", "2")
 	}
-	g.tunnelPage(w, r, 503, "CONNECTING", "Connecting to router", "The router is still establishing its secure tunnel. This page will refresh automatically when LuCI is ready.", true)
+	g.tunnelPageWithExpiry(w, r, 503, "CONNECTING", "Connecting to router", "The router is still establishing its secure tunnel. This page will refresh automatically when LuCI is ready.", true, expiresAt)
 }
 
 func (g *Gateway) tunnelPage(w http.ResponseWriter, r *http.Request, status int, eyebrow, title, message string, retry bool) {
+	g.tunnelPageWithExpiry(w, r, status, eyebrow, title, message, retry, time.Time{})
+}
+
+func (g *Gateway) tunnelPageWithExpiry(w http.ResponseWriter, r *http.Request, status int, eyebrow, title, message string, retry bool, expiresAt time.Time) {
 	if !acceptsHTML(r) {
 		fail(w, status, message)
 		return
@@ -468,6 +472,13 @@ func (g *Gateway) tunnelPage(w http.ResponseWriter, r *http.Request, status int,
 	primary := `<button class="action primary" type="button" onclick="location.reload()">Try again</button>`
 	if !retry {
 		primary = `<button class="action primary" type="button" onclick="window.close();this.textContent='You can close this tab'">Close tab</button>`
+	}
+	expiry := ""
+	if !expiresAt.IsZero() {
+		expiry = fmt.Sprintf(`<style>.session-time{display:inline-flex;align-items:center;gap:5px;margin-right:7px;color:var(--muted);font-size:11px}.session-time strong{color:var(--navy);font-family:ui-monospace,monospace;font-size:12px}</style><span class="session-time" data-expires-at="%d">Time remaining: <strong>--:--</strong></span><script>(function(){var e=document.querySelector('.session-time'),s=e&&e.querySelector('strong'),end=e&&Number(e.dataset.expiresAt);if(!e||!s)return;function tick(){var n=Math.max(0,Math.ceil((end-Date.now())/1000));if(!n){s.textContent='Expired';location.reload();return}s.textContent=Math.floor(n/60)+':'+String(n%%60).padStart(2,'0')}tick();setInterval(tick,1000)})();</script>`, expiresAt.UnixMilli())
+	}
+	if expiry != "" {
+		primary = expiry + primary
 	}
 	returnLink := ""
 	if g.Config.PublicURL != "" {
@@ -581,7 +592,7 @@ func (g *Gateway) Handler() http.Handler {
 		g.mu.Unlock()
 		if p == nil && session.Protocol == "SSH_LUCI" && r.URL.Path == "/" && acceptsHTML(r) {
 			w.Header().Set("Retry-After", "2")
-			g.tunnelLoadingPage(w, r)
+			g.tunnelLoadingPage(w, r, session.ExpiresAt)
 			return
 		}
 		if r.URL.Path == "/close" {
@@ -613,7 +624,7 @@ func (g *Gateway) Handler() http.Handler {
 		if session.Protocol == "SSH_LUCI" {
 			if p == nil {
 				w.Header().Set("Retry-After", "2")
-				g.tunnelLoadingPage(w, r)
+				g.tunnelLoadingPage(w, r, session.ExpiresAt)
 				return
 			}
 			g.luci(w, r, id, p)
@@ -654,7 +665,7 @@ func (g *Gateway) Handler() http.Handler {
 		if p == nil {
 			log.Printf("rms tunnel session %s has no router pair path=%s", id, r.URL.Path)
 			w.Header().Set("Retry-After", "2")
-			g.tunnelLoadingPage(w, r)
+			g.tunnelLoadingPage(w, r, session.ExpiresAt)
 			return
 		}
 		g.proxy(w, r, id, p)

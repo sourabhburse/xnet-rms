@@ -152,13 +152,13 @@ func TestTunnelLoadingPageUsesBreathingFourCircleLogo(t *testing.T) {
 	r.Header.Set("Accept", "text/html,application/xhtml+xml")
 	w := httptest.NewRecorder()
 
-	g.tunnelLoadingPage(w, r)
+	g.tunnelLoadingPage(w, r, time.Now().Add(time.Minute))
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
 	}
 	body := w.Body.String()
-	for _, want := range []string{`class="mark loading"`, `viewBox="0 0 62 24"`, `fill="#203864"`, "@keyframes breathe", "prefers-reduced-motion:reduce"} {
+	for _, want := range []string{`class="mark loading"`, `viewBox="0 0 62 24"`, `fill="#203864"`, "Time remaining", "@keyframes breathe", "prefers-reduced-motion:reduce"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("loading page does not contain %q", want)
 		}
