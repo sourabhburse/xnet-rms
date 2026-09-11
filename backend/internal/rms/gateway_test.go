@@ -158,12 +158,12 @@ func TestTunnelLoadingPageUsesBreathingFourCircleLogo(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
 	}
 	body := w.Body.String()
-	for _, want := range []string{`class="mark loading"`, "@keyframes breathe", "prefers-reduced-motion:reduce"} {
+	for _, want := range []string{`class="mark loading"`, `viewBox="0 0 62 24"`, `fill="#203864"`, "@keyframes breathe", "prefers-reduced-motion:reduce"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("loading page does not contain %q", want)
 		}
 	}
-	if got := strings.Count(body, "<i></i>"); got != 4 {
+	if got := strings.Count(body, "<circle "); got != 4 {
 		t.Fatalf("logo circle count = %d, want 4", got)
 	}
 }
