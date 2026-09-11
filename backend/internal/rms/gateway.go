@@ -121,6 +121,21 @@ func copyLuciResponseHeaders(dst, src http.Header) {
 	}
 }
 
+func injectLuciLoadingFallback(body []byte) []byte {
+	lower := bytes.ToLower(body)
+	marker := []byte("</head>")
+	idx := bytes.Index(lower, marker)
+	if idx < 0 {
+		return body
+	}
+	const fallback = `<style id="xnet-rms-loading-fallback">.main > .loading{display:none!important}</style>`
+	out := make([]byte, 0, len(body)+len(fallback))
+	out = append(out, body[:idx]...)
+	out = append(out, fallback...)
+	out = append(out, body[idx:]...)
+	return out
+}
+
 func forwardLuciRequestHeaders(src http.Header) http.Header {
 	dst := src.Clone()
 	dst.Del("Connection")
@@ -212,6 +227,17 @@ func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pai
 		if err == nil && u.IsAbs() && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost") {
 			w.Header().Set("Location", u.RequestURI())
 		}
+	}
+	if r.Method == http.MethodGet && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") && resp.Header.Get("Content-Encoding") == "" {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		if readErr != nil {
+			log.Printf("rms tunnel session %s LuCI HTML read failed path=%s: %v", id, r.URL.Path, readErr)
+		}
+		body = injectLuciLoadingFallback(body)
+		w.Header().Del("Content-Length")
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(body)
+		return
 	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, 1024*1024))

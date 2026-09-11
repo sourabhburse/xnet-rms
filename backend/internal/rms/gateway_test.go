@@ -168,6 +168,20 @@ func TestTunnelLoadingPageUsesBreathingFourCircleLogo(t *testing.T) {
 	}
 }
 
+func TestInjectLuciLoadingFallback(t *testing.T) {
+	body := []byte(`<html><head><title>LuCI</title></head><body><div class="main"><div class="loading">Collecting data...</div></div></body></html>`)
+	got := string(injectLuciLoadingFallback(body))
+	if !strings.Contains(got, `id="xnet-rms-loading-fallback"`) {
+		t.Fatal("LuCI loading fallback was not injected")
+	}
+	if strings.Index(got, `id="xnet-rms-loading-fallback"`) > strings.Index(got, "</head>") {
+		t.Fatal("LuCI loading fallback was injected after </head>")
+	}
+	if unchanged := string(injectLuciLoadingFallback([]byte("<html><body>no head</body></html>"))); unchanged != "<html><body>no head</body></html>" {
+		t.Fatalf("document without head was changed: %s", unchanged)
+	}
+}
+
 func TestTerminalPageInjectsEscapedDeviceDetails(t *testing.T) {
 	page := terminalPage([]byte(`<strong id="device-name">__XNET_DEVICE_NAME__</strong><span>__XNET_DEVICE_SERIAL__</span>`), Session{
 		DeviceName:   "Lab <Gateway>",
