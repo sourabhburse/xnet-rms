@@ -120,7 +120,7 @@ func TestTunnelPageRendersHTMLForDocumentRequests(t *testing.T) {
 		t.Fatalf("content type = %q", got)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"XNET RMS", "Remote session ended", "The secure tunnel closed", "Open XNET RMS", "Close tab", "min-width:122px", "min-height:38px"} {
+	for _, want := range []string{"XNET RMS", "Remote session ended", "The secure tunnel closed", "Open XNET RMS", "Close tab"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("HTML page does not contain %q", want)
 		}
@@ -186,7 +186,7 @@ func TestInjectLuciSessionChrome(t *testing.T) {
 	body := []byte(`<html><head></head><body><div class="main">LuCI</div></body></html>`)
 	session := Session{DeviceName: "Lab Gateway", DeviceSerial: "FG090422657", ExpiresAt: time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)}
 	got := string(injectLuciSessionChrome(body, session, "https://rms.example:8445"))
-	for _, want := range []string{`id="xnet-rms-session-indicator"`, `aria-label="Session time remaining"`, `Extend 15 min`, `event.preventDefault()`, `__rms/session-status`, `__rms/session-extend`, `Remote session ended`, `Lab Gateway`, `FG090422657`, `viewBox="0 0 62 24"`} {
+	for _, want := range []string{`id="xnet-rms-session-indicator"`, `aria-label="Session time remaining"`, `Extend 15 min`, `event.preventDefault()`, `min-width:122px`, `min-height:38px`, `__rms/session-status`, `__rms/session-extend`, `Remote session ended`, `Lab Gateway`, `FG090422657`, `viewBox="0 0 62 24"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("session chrome does not contain %q", want)
 		}
