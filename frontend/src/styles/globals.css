@@ -181,6 +181,31 @@
   --color-brand-azure: var(--brand-azure);
 }
 
+/* Keep a small fallback motion on the loading image for browsers that do not
+   apply styles embedded in an SVG loaded through <img>. */
+@keyframes rms-logo-pulse {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(0.98);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+.rms-loading-logo {
+  animation: rms-logo-pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rms-loading-logo {
+    animation: none;
+  }
+}
+
 @layer base {
   * {
     border-color: var(--color-border);

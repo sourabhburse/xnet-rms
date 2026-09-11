@@ -52,7 +52,7 @@ export default function Login({ onLoginSuccess, api }: LoginProps) {
 
         <div className="relative z-10 flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-6 text-center">
-            <BrandMark className="h-16 w-[165px]" />
+            <BrandMark variant="dark" className="h-16 w-[220px]" />
             <span className="font-display text-3xl font-semibold tracking-[-0.03em] text-white">XNET RMS</span>
           </div>
         </div>
@@ -63,7 +63,7 @@ export default function Login({ onLoginSuccess, api }: LoginProps) {
           <CardContent className="p-7 sm:p-10 lg:p-0">
             <div className="mb-10 lg:hidden">
               <div className="flex items-center gap-3">
-                <BrandMark className="h-9 w-[93px]" />
+                <BrandMark variant="light" className="h-9 w-[121px]" />
                 <span className="text-lg font-semibold tracking-tight text-slate-900">XNET RMS</span>
               </div>
             </div>

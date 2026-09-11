@@ -44,6 +44,29 @@ export function AppShell({
   onToggleTheme,
   children,
 }: AppShellProps) {
+  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!mobileNavOpen) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [mobileNavOpen]);
+
+  const selectMobileView = (view: string) => {
+    onSelectView(view);
+    setMobileNavOpen(false);
+  };
+
   return (
     <div className="grid h-screen grid-cols-1 overflow-hidden bg-background lg:grid-cols-[248px_1fr]">
       <div className="hidden min-h-0 lg:block">
@@ -55,9 +78,34 @@ export function AppShell({
         />
       </div>
 
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-50 lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Navigation menu"
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/45 backdrop-blur-[1px]"
+            aria-label="Close navigation"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <div className="relative z-10 h-full w-[min(86vw,300px)] shadow-2xl">
+            <AppSidebar
+              user={user}
+              currentView={currentView}
+              onSelectView={selectMobileView}
+              counts={counts}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="flex min-h-0 min-w-0 flex-col">
         <Topbar
           user={user}
+          onOpenMenu={() => setMobileNavOpen(true)}
           crumb={crumb}
           organizations={organizations}
           selectedOrg={selectedOrg}

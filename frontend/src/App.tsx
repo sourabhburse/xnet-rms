@@ -39,6 +39,22 @@ import ReportsView from './components/ReportsView';
 import AlertsView from './components/AlertsView';
 import Login from './Login';
 
+function LoadingScreen() {
+  return (
+    <main
+      className="grid min-h-screen place-items-center bg-[#101315] px-6"
+      aria-busy="true"
+      aria-label="Loading XNET RMS"
+    >
+      <img
+        src="/logo/svg/xnet-logo-loading.svg"
+        className="rms-loading-logo h-auto w-[min(320px,80vw)]"
+        alt="Loading XNET RMS"
+      />
+    </main>
+  );
+}
+
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -276,11 +292,7 @@ export default function App() {
 
   // Unauthenticated: Show NCMS-inspired Login Screen
   if (loadingUser) {
-    return (
-      <div className="grid min-h-screen place-items-center bg-background">
-        <p className="text-sm text-muted-foreground">Loading XNET RMS...</p>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   if (!user) {

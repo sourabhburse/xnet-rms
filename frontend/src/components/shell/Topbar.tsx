@@ -8,6 +8,7 @@ import {
   Building2,
   Check,
   ChevronDown,
+  Menu,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ import {
 
 interface TopbarProps {
   user: User;
+  onOpenMenu: () => void;
   crumb: React.ReactNode;
   organizations: Organization[];
   selectedOrg: string;
@@ -42,6 +44,7 @@ interface TopbarProps {
 
 export function Topbar({
   user,
+  onOpenMenu,
   crumb,
   organizations,
   selectedOrg,
@@ -69,12 +72,22 @@ export function Topbar({
   };
 
   return (
-    <header className="flex h-[58px] shrink-0 items-center gap-3.5 border-b border-border bg-card px-4">
-      <div className="text-[13px] text-muted-foreground [&_b]:font-semibold [&_b]:text-foreground">
+    <header className="flex h-[58px] shrink-0 items-center gap-2 border-b border-border bg-card px-3 sm:gap-3.5 sm:px-4">
+      <Button
+        variant="outline"
+        size="icon"
+        className="size-9 shrink-0 lg:hidden"
+        aria-label="Open navigation"
+        onClick={onOpenMenu}
+      >
+        <Menu className="size-4" />
+      </Button>
+
+      <div className="min-w-0 max-w-[34vw] truncate text-[13px] text-muted-foreground [&_b]:font-semibold [&_b]:text-foreground">
         {crumb}
       </div>
 
-      <div className="relative ml-auto w-[300px] max-w-[40vw]">
+      <div className="relative ml-auto hidden w-[300px] max-w-[40vw] sm:block">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           aria-label="Search devices"
@@ -99,12 +112,12 @@ export function Topbar({
           <DropdownMenuTrigger asChild>
             <Button
               variant="outline"
-              className="h-9 gap-2 px-3 text-[13px] font-normal"
+              className="size-9 shrink-0 px-0 text-[13px] font-normal sm:h-9 sm:w-auto sm:gap-2 sm:px-3"
               aria-label={`Select customer scope, currently ${activeOrgName}`}
             >
               <Building2 className="size-3.5 text-muted-foreground" />
-              <span className="max-w-[160px] truncate">{activeOrgName}</span>
-              <ChevronDown className="size-3.5 text-muted-foreground" />
+              <span className="hidden max-w-[160px] truncate sm:inline">{activeOrgName}</span>
+              <ChevronDown className="hidden size-3.5 text-muted-foreground sm:block" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-[220px]">
