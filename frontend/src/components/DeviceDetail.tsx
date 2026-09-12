@@ -27,6 +27,7 @@ import { toast } from "sonner";
 
 import { Device, SessionItem, SnapshotField, SnapshotSource, TagItem, User } from "../types";
 import { api, formatApiError } from "../api";
+import { navigateSessionWindow, openSessionWindow } from "../lib/session-window";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -267,11 +268,12 @@ export default function DeviceDetail({
   }, [selectedSource, device.id]);
 
   const handleOpenRemote = async (protocol: "SSH_LUCI" | "TERMINAL_SSH") => {
+    const sessionTab = openSessionWindow(protocol === "SSH_LUCI" ? "LuCI" : "terminal");
     setSessionLoading(true);
     setSessionNotice(null);
     try {
       const res = await api<{ id: string; expires_at: string; launch_url: string }>("sessions", "POST", { device_id: device.id, protocol });
-      window.open(res.launch_url, "_blank");
+      navigateSessionWindow(sessionTab, res.launch_url);
       setSessionNotice({
         type: "success",
         title: protocol === "SSH_LUCI" ? "LuCI session launched" : "Terminal session launched",
@@ -282,6 +284,7 @@ export default function DeviceDetail({
       });
       void onRefreshSessions?.();
     } catch (err) {
+      if (sessionTab && !sessionTab.closed) sessionTab.close();
       const formatted = formatApiError(err);
       setSessionNotice({ type: formatted.type as NoticeType, title: formatted.title, message: formatted.message });
     } finally {
