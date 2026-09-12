@@ -72,11 +72,11 @@ export function Topbar({
   };
 
   return (
-    <header className="flex h-[58px] shrink-0 items-center gap-2 border-b border-border bg-card px-3 sm:gap-3.5 sm:px-4">
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-4 sm:gap-3.5 sm:px-6">
       <Button
         variant="outline"
         size="icon"
-        className="size-9 shrink-0 lg:hidden"
+        className="size-8 shrink-0 lg:hidden"
         aria-label="Open navigation"
         onClick={onOpenMenu}
       >
@@ -143,7 +143,7 @@ export function Topbar({
       <Button
         variant="outline"
         size="icon"
-        className="size-9"
+        className="size-8"
         aria-label="Toggle theme"
         onClick={onToggleTheme}
       >
@@ -157,7 +157,7 @@ export function Topbar({
       <Button
         variant="outline"
         size="icon"
-        className="size-9"
+        className="size-8"
         aria-label="Refresh telemetry"
         onClick={onRefresh}
         disabled={refreshing}

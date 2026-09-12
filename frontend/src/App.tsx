@@ -24,7 +24,6 @@ import { DevicesArea, DEVICE_TAB_VIEWS } from './components/devices/DevicesArea'
 import { Toaster } from './components/ui/sonner';
 import { useTheme } from './lib/use-theme';
 import { parseAppRoute, routeForDevice, routeForView } from './lib/routes';
-import { navigateSessionWindow, openSessionWindow } from './lib/session-window';
 import FleetOverview from './components/overview/FleetOverview';
 import DeviceList from './components/DeviceList';
 import DeviceDetail from './components/DeviceDetail';
@@ -78,9 +77,9 @@ export default function App() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [totalDevices, setTotalDevices] = useState<number>(0);
   const [page, setPage] = useState<number>(1);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedTag, setSelectedTag] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>(() => new URLSearchParams(window.location.search).get('q') || '');
+  const [selectedTag, setSelectedTag] = useState<string>(() => new URLSearchParams(window.location.search).get('tag') || '');
+  const [statusFilter, setStatusFilter] = useState<string>(() => new URLSearchParams(window.location.search).get('status') || '');
 
   // Auxiliary data
   const [stats, setStats] = useState<DashboardStats>({ total: 0, online: 0, offline: 0, revoked: 0 });
@@ -190,7 +189,7 @@ export default function App() {
           page: String(page),
           q: lookupQuery,
           tag: deviceSerial ? '' : selectedTag,
-          status: deviceSerial ? '' : statusFilter,
+          status: deviceSerial ? '' : ['ONLINE', 'OFFLINE', 'REVOKED'].includes(statusFilter) ? statusFilter : '',
         });
         if (selectedOrg) params.set('organization_id', selectedOrg);
         const res = await api<{ items: Device[]; total: number }>(`devices?${params}`);
@@ -240,7 +239,6 @@ export default function App() {
 
   // Remote LuCI Launcher (Server-Side SSH_LUCI)
   const handleOpenLuCI = async (dev: Device) => {
-    const sessionTab = openSessionWindow('LuCI');
     try {
       toast.loading(`Initiating LuCI session for ${dev.serial_number}...`, { id: 'luci' });
       const session = await api<{ id: string; expires_at: string; launch_url: string }>(
@@ -249,10 +247,9 @@ export default function App() {
         { device_id: dev.id, protocol: 'SSH_LUCI' }
       );
       toast.success('LuCI tunnel ready; router login required.', { id: 'luci' });
-      navigateSessionWindow(sessionTab, session.launch_url);
+      window.open(session.launch_url, '_blank');
       refreshData();
     } catch (err) {
-      if (sessionTab && !sessionTab.closed) sessionTab.close();
       const formatted = formatApiError(err);
       toast.dismiss('luci');
       const notify = formatted.type === 'error' ? toast.error : toast.warning;
@@ -262,7 +259,6 @@ export default function App() {
 
   // Remote Web Terminal Launcher (TERMINAL_SSH)
   const handleOpenTerminal = async (dev: Device) => {
-    const sessionTab = openSessionWindow('terminal');
     try {
       toast.loading(`Opening terminal for ${dev.serial_number}...`, { id: 'term' });
       const session = await api<{ id: string; expires_at: string; launch_url: string }>(
@@ -271,10 +267,9 @@ export default function App() {
         { device_id: dev.id, protocol: 'TERMINAL_SSH' }
       );
       toast.success('Terminal session authorized!', { id: 'term' });
-      navigateSessionWindow(sessionTab, session.launch_url);
+      window.open(session.launch_url, '_blank');
       refreshData();
     } catch (err) {
-      if (sessionTab && !sessionTab.closed) sessionTab.close();
       const formatted = formatApiError(err);
       toast.dismiss('term');
       toast.error(formatted.title, { description: formatted.message });
@@ -377,7 +372,7 @@ export default function App() {
         )}
 
         {isDeviceDetail ? (
-          <div className="p-6">
+          <div className="min-h-full">
             {detailDevice ? (
               <DeviceDetail
                 device={detailDevice}
@@ -418,6 +413,7 @@ export default function App() {
             onSelectView={goToView}
             counts={{
               devices: deviceTotal,
+              offline: stats.offline,
               groups: groups.length,
               awaiting: awaitingCount,
               unclaimed: pendingCount,

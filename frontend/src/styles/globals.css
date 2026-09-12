@@ -38,14 +38,20 @@
   --chart-4: #a7bcde;
   --chart-5: #668bce;
 
-  --sidebar: #ffffff;
-  --sidebar-foreground: #545b68;
-  --sidebar-primary: #2e5496;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e9eff8;
-  --sidebar-accent-foreground: #2e5496;
-  --sidebar-border: #e5e7ec;
-  --sidebar-ring: #2e5496;
+  --sidebar: #182a4a;
+  --sidebar-foreground: #c6d2e6;
+  --sidebar-muted: #8ba3c9;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #182a4a;
+  --sidebar-accent: rgba(255, 255, 255, 0.1);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #8ba3c9;
+
+  --row-divider: #eef0f3;
+  --row-down-bg: #fdfafb;
+  --kpi-down-bg: #fdf7f8;
+  --session-ok-bg: #f2f8f4;
 
   /* semantic status */
   --ok: #1a7f47;
@@ -94,14 +100,20 @@
   --chart-4: #2f4468;
   --chart-5: #7ca4e0;
 
-  --sidebar: #131519;
-  --sidebar-foreground: #a2a9b4;
-  --sidebar-primary: #7ca4e0;
-  --sidebar-primary-foreground: #0c1220;
-  --sidebar-accent: #1f2b44;
-  --sidebar-accent-foreground: #cdddf6;
-  --sidebar-border: #282c34;
-  --sidebar-ring: #7ca4e0;
+  --sidebar: #182a4a;
+  --sidebar-foreground: #c6d2e6;
+  --sidebar-muted: #8ba3c9;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #182a4a;
+  --sidebar-accent: rgba(255, 255, 255, 0.1);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #8ba3c9;
+
+  --row-divider: #282c34;
+  --row-down-bg: #2a181d;
+  --kpi-down-bg: #2a181d;
+  --session-ok-bg: #152a20;
 
   --ok: #6bd299;
   --ok-bg: #12281c;
@@ -162,8 +174,14 @@
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-row-divider: var(--row-divider);
+  --color-row-down-bg: var(--row-down-bg);
+  --color-kpi-down-bg: var(--kpi-down-bg);
+  --color-session-ok-bg: var(--session-ok-bg);
 
   --color-ok: var(--ok);
   --color-ok-bg: var(--ok-bg);
@@ -181,8 +199,9 @@
   --color-brand-azure: var(--brand-azure);
 }
 
-/* Keep a small fallback motion on the loading image for browsers that do not
-   apply styles embedded in an SVG loaded through <img>. */
+/* The supplied loading SVG carries the loading-specific geometry and timing
+   offsets. Keep a small fallback motion on the image itself for browsers that
+   do not apply styles embedded in an SVG loaded through <img>. */
 @keyframes rms-logo-pulse {
   0%,
   100% {

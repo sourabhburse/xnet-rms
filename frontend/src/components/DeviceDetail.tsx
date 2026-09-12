@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
   Code2,
   Ellipsis,
   ExternalLink,
@@ -9,7 +10,6 @@ import {
   History,
   Loader2,
   RefreshCw,
-  Router,
   ShieldCheck,
   XCircle,
 } from "lucide-react";
@@ -27,11 +27,9 @@ import { toast } from "sonner";
 
 import { Device, SessionItem, SnapshotField, SnapshotSource, TagItem, User } from "../types";
 import { api, formatApiError } from "../api";
-import { navigateSessionWindow, openSessionWindow } from "../lib/session-window";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,7 +39,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 interface DeviceDetailProps {
@@ -65,6 +62,19 @@ function displayValue(value: unknown) {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function relativeTime(value: string) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "Unknown";
+  const seconds = Math.round((timestamp - Date.now()) / 1000);
+  const absolute = Math.abs(seconds);
+  if (absolute < 60) return seconds <= 0 ? "Just now" : "In under a minute";
+  const minutes = Math.round(seconds / 60);
+  if (Math.abs(minutes) < 60) return `${Math.abs(minutes)}m ${seconds < 0 ? "ago" : "from now"}`;
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) return `${Math.abs(hours)}h ${seconds < 0 ? "ago" : "from now"}`;
+  return `${Math.abs(Math.round(hours / 24))}d ${seconds < 0 ? "ago" : "from now"}`;
 }
 
 function numberValue(value: unknown) {
@@ -113,6 +123,11 @@ function statusLabel(status: Device["status"]) {
   return status === "ONLINE" ? "Online" : status === "OFFLINE" ? "Offline" : "Revoked";
 }
 
+function networkAddress(device: Device) {
+  const candidate = device as Device & { ip?: string; ip_address?: string; wan_ip?: string };
+  return candidate.ip || candidate.ip_address || candidate.wan_ip || "No IP reported";
+}
+
 function Notice({
   type,
   title,
@@ -147,23 +162,27 @@ function MetricCard({
   metric,
   format,
   meter,
+  trend,
 }: {
   label: string;
   metric: { field: SnapshotField; source: SnapshotSource } | null;
   format?: (value: unknown, unit?: string) => string;
   meter?: number | null;
+  trend?: number[];
 }) {
-  const value = metric ? numberValue(metric.field.value) : null;
   const shown = metric ? format?.(metric.field.value, metric.field.unit) ?? `${displayValue(metric.field.value)}${metric.field.unit ? ` ${metric.field.unit}` : ""}` : "—";
   const meterWidth = meter == null ? null : Math.max(0, Math.min(100, meter));
+  const trendValues = trend?.filter((value) => Number.isFinite(value)).slice(-7) ?? [];
+  const trendMin = trendValues.length ? Math.min(...trendValues) : 0;
+  const trendMax = trendValues.length ? Math.max(...trendValues) : 0;
+  const trendHeights = trendValues.map((value) => trendMax === trendMin ? 60 : Math.max(20, Math.min(100, Math.round(20 + ((value - trendMin) / (trendMax - trendMin)) * 80))));
+  const heightClass = (height: number) => height < 35 ? "h-1/4" : height < 50 ? "h-2/5" : height < 65 ? "h-3/5" : height < 80 ? "h-4/5" : "h-full";
   return (
-    <div className="rounded-lg border border-border bg-secondary/35 p-3">
-      <div className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">{label}</div>
-      <div className="mt-2 font-display text-[18px] font-semibold tabular-nums text-foreground">{shown}</div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
-        <span className="block h-full rounded-full bg-primary transition-[width]" style={{ width: `${meterWidth ?? (value == null ? 0 : 36)}%`, opacity: meterWidth == null && value == null ? 0.35 : 1 }} />
-      </div>
-      <div className="mt-1 text-[10.5px] text-muted-foreground">{metric?.source.stale ? "Stale snapshot" : "Latest snapshot"}</div>
+    <div className="min-w-0 border-b border-r border-row-divider px-6 py-4">
+      <div className="text-[13px] text-muted-foreground">{label}</div>
+      <div className={cn("mt-1.5 font-display text-[24px] font-semibold leading-none tabular-nums", !metric && "text-muted-foreground")}>{shown}</div>
+      {meterWidth != null ? <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-secondary"><span className={cn("block h-full rounded-full bg-primary", meterWidth === 0 ? "w-0" : meterWidth < 12 ? "w-[10%]" : meterWidth < 25 ? "w-1/5" : meterWidth < 38 ? "w-[30%]" : meterWidth < 50 ? "w-2/5" : meterWidth < 63 ? "w-3/5" : meterWidth < 75 ? "w-3/4" : meterWidth < 88 ? "w-4/5" : "w-full")} /></div> : trendValues.length ? <div className="mt-2 flex h-[22px] items-end gap-0.5">{trendHeights.map((height, index) => <span key={`${height}-${index}`} className={cn("flex-1 bg-chart-4", index === trendHeights.length - 1 && "bg-primary", heightClass(height))} />)}</div> : <div className="mt-2 text-[13px] text-muted-foreground">{metric ? "Trend not collected" : "Not collected by this template"}</div>}
+      {metric && <div className="mt-2 text-[11px] text-muted-foreground">{metric.source.stale ? "Stale snapshot" : "Latest snapshot"}</div>}
     </div>
   );
 }
@@ -186,6 +205,7 @@ export default function DeviceDetail({
   const [sessionLoading, setSessionLoading] = useState(false);
   const [sessionActionId, setSessionActionId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
+  const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [tagEditorOpen, setTagEditorOpen] = useState(false);
   const [sessionNotice, setSessionNotice] = useState<{
@@ -247,12 +267,11 @@ export default function DeviceDetail({
   }, [selectedSource, device.id]);
 
   const handleOpenRemote = async (protocol: "SSH_LUCI" | "TERMINAL_SSH") => {
-    const sessionTab = openSessionWindow(protocol === "SSH_LUCI" ? "LuCI" : "terminal");
     setSessionLoading(true);
     setSessionNotice(null);
     try {
       const res = await api<{ id: string; expires_at: string; launch_url: string }>("sessions", "POST", { device_id: device.id, protocol });
-      navigateSessionWindow(sessionTab, res.launch_url);
+      window.open(res.launch_url, "_blank");
       setSessionNotice({
         type: "success",
         title: protocol === "SSH_LUCI" ? "LuCI session launched" : "Terminal session launched",
@@ -263,7 +282,6 @@ export default function DeviceDetail({
       });
       void onRefreshSessions?.();
     } catch (err) {
-      if (sessionTab && !sessionTab.closed) sessionTab.close();
       const formatted = formatApiError(err);
       setSessionNotice({ type: formatted.type as NoticeType, title: formatted.title, message: formatted.message });
     } finally {
@@ -294,6 +312,16 @@ export default function DeviceDetail({
     tx: findMetric(latestSources, ["tx_bytes", "sent"]),
     registration: findMetric(latestSources, ["registration"]),
   }), [latestSources]);
+
+  const historyTrend = (terms: string[]) => historyData
+    .map((history) => Object.entries(history.fields ?? {}).find(([key, field]) => fieldMatches(key, field, terms)))
+    .map((entry) => entry ? numberValue(entry[1].value) : null)
+    .filter((value): value is number => value != null);
+
+  const displayedSession = activeSessions[0];
+  const displayedSessionId = displayedSession?.id ?? (localSessionActive ? sessionNotice?.sessionId : undefined);
+  const displayedExpiresAt = displayedSession?.expires_at ?? (localSessionActive ? sessionNotice?.expiresAt : undefined);
+  const displayedProtocol = displayedSession?.protocol ?? "SSH_LUCI";
 
   const closeSession = async (sessionId = sessionNotice?.sessionId) => {
     if (!sessionId) return;
@@ -341,137 +369,40 @@ export default function DeviceDetail({
   };
 
   return (
-    <div className="mx-auto flex max-w-[1400px] flex-col gap-4.5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="flex min-h-full flex-col bg-card">
+      <section className={cn("flex flex-wrap items-start justify-between gap-6 border-b border-border border-l-[3px] px-6 py-5", device.status === "ONLINE" ? "border-l-ok" : device.status === "OFFLINE" ? "border-l-down" : "border-l-neutral2")}>
         <div className="flex min-w-0 items-start gap-3">
-          <Button variant="ghost" size="icon" className="mt-0.5 size-8 shrink-0" aria-label="Back to devices" onClick={onBack}><ArrowLeft className="size-4" /></Button>
+          <Button variant="outline" size="icon" className="mt-0.5 size-8 shrink-0" aria-label="Back to devices" onClick={onBack}><ArrowLeft className="size-4" /></Button>
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <Router className="size-5 shrink-0 text-primary" />
-              <h1 className="truncate font-display text-[20px] font-semibold text-foreground">{device.name || device.serial_number}</h1>
-              <Badge variant={statusVariant(device.status)}><span className="size-1.5 rounded-full bg-current" />{statusLabel(device.status)}</Badge>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {[device.serial_number, device.model || "Unknown model", ...(device.groups ?? [])].map((chip, index) => <span key={`${chip}-${index}`} className={cn("rounded-md border px-2 py-1 text-[10.5px] text-muted-foreground", index === 0 ? "font-mono" : "bg-secondary/40")}>{chip}</span>)}
-              {device.firmware_version && <span className="rounded-md border border-border bg-secondary/40 px-2 py-1 font-mono text-[10.5px] text-muted-foreground">v{device.firmware_version}</span>}
-            </div>
+            <h1 className="truncate font-display text-[22px] font-semibold tracking-[-0.01em] text-foreground">{device.name || device.serial_number}</h1>
+            <p className="mt-1 truncate font-mono text-[12px] text-muted-foreground">{device.serial_number} · {device.model || "Unknown model"}{device.firmware_version ? ` v${device.firmware_version}` : ""} · {(device.groups ?? ["No group"])[0]} · {networkAddress(device)}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]"><span className={cn("inline-flex items-center gap-1.5 font-medium", device.status === "ONLINE" ? "text-ok" : device.status === "OFFLINE" ? "text-down" : "text-neutral2")}><span className="size-1.5 rounded-full bg-current" />{statusLabel(device.status)}</span><span className="text-muted-foreground">Last contact <span className="font-mono text-foreground/75">{device.last_seen ? relativeTime(device.last_seen) : "Never"}</span></span><span className="text-muted-foreground">{device.active_alerts ? `${device.active_alerts} open alert${device.active_alerts === 1 ? "" : "s"}` : "No open alerts"}</span></div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => { void loadSnapshots(); onRefreshDevice(); }} disabled={loadingSnapshots}><RefreshCw className={cn("size-3.5", loadingSnapshots && "animate-spin")} />Refresh telemetry</Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button variant="outline" size="icon" className="size-8" aria-label="Device actions"><Ellipsis className="size-4" /></Button></DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-[190px]">
-              <DropdownMenuItem disabled>Rename device</DropdownMenuItem>
-              <DropdownMenuItem disabled>Move to group…</DropdownMenuItem>
-              <DropdownMenuItem disabled={!canAdmin} onSelect={() => setTagEditorOpen(true)}>Edit tags…</DropdownMenuItem>
-              {isSuperAdmin && !device.revoked && <><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" onSelect={() => setRevokeOpen(true)}>Revoke access…</DropdownMenuItem></>}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
+        <div className="flex flex-wrap items-center gap-2"><Button size="sm" onClick={() => void handleOpenRemote("SSH_LUCI")} disabled={!canOperate || device.status !== "ONLINE" || sessionLoading}><Globe2 />Open LuCI</Button><Button variant="outline" size="sm" onClick={() => void handleOpenRemote("TERMINAL_SSH")} disabled={!canOperate || device.status !== "ONLINE" || sessionLoading}><Code2 />Open terminal</Button><Button variant="outline" size="sm" onClick={() => { void loadSnapshots(); onRefreshDevice(); }} disabled={loadingSnapshots}><RefreshCw className={cn(loadingSnapshots && "animate-spin")} />Refresh</Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" className="size-8" aria-label="Device actions"><Ellipsis /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="min-w-[180px]"><DropdownMenuItem disabled={!canAdmin} onSelect={() => setTagEditorOpen(true)}>Edit tags…</DropdownMenuItem>{isSuperAdmin && !device.revoked && <><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" onSelect={() => setRevokeOpen(true)}>Revoke access…</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu></div>
+      </section>
 
-      <Card className="border-accent bg-accent/65">
-        <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
-          <div className="flex items-start gap-3">
-            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground"><ShieldCheck className="size-4.5" /></div>
-            <div><CardTitle className="text-[14px]">Remote management</CardTitle><CardDescription className="mt-1 max-w-[680px] text-accent-foreground/80">Access the router through the reverse tunnel. Sessions start at 15 minutes and can be extended while active.</CardDescription></div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => handleOpenRemote("SSH_LUCI")} disabled={!canOperate || device.status !== "ONLINE" || sessionLoading}><Globe2 className="size-4" />Open LuCI</Button>
-            <Button variant="outline" onClick={() => handleOpenRemote("TERMINAL_SSH")} disabled={!canOperate || device.status !== "ONLINE" || sessionLoading}><Code2 className="size-4" />Open terminal</Button>
-          </div>
-        </CardContent>
-      </Card>
+      {(displayedSessionId || sessionNotice?.sessionId) && (displayedExpiresAt || sessionNotice?.sessionId) && <div className="flex flex-wrap items-center gap-3 border-b border-ok-border bg-session-ok-bg px-6 py-2.5 text-[13px] text-ok"><span className="size-1.5 rounded-full bg-ok" /><span>{displayedProtocol === "TERMINAL_SSH" ? "Terminal" : "LuCI"} session active{displayedSessionId ? ` · ${displayedSessionId.slice(0, 10)}…` : ""}{displayedExpiresAt ? <> · expires <span className="font-mono">{new Date(displayedExpiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></> : null}</span><div className="ml-auto flex flex-wrap gap-2">{sessionNotice?.launchUrl && <Button variant="outline" size="sm" className="h-7 border-ok-border bg-card" onClick={() => window.open(sessionNotice.launchUrl, "_blank")}><ExternalLink className="size-3.5" />Reopen tab</Button>}{displayedSessionId && <Button variant="outline" size="sm" className="h-7 border-ok-border bg-card" onClick={() => void extendSession(displayedSessionId)} disabled={sessionActionId === displayedSessionId}>Extend 15 min</Button>}{displayedSessionId && <Button variant="outline" size="sm" className="h-7 border-ok-border bg-card" onClick={() => void closeSession(displayedSessionId)}><XCircle className="size-3.5" />Close</Button>}</div></div>}
 
-      {sessionNotice && (!sessionNotice.sessionId || localSessionActive) && <Notice type={sessionNotice.type} title={sessionNotice.title} onClose={() => setSessionNotice(null)}>
-        <p>{sessionNotice.message}</p>
-        {sessionNotice.launchUrl && <div className="mt-2 flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={() => window.open(sessionNotice.launchUrl, "_blank")}><ExternalLink className="size-3.5" />Open session tab</Button>
-          {sessionNotice.sessionId && <>
-            <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={() => extendSession(sessionNotice.sessionId!)} disabled={sessionActionId === sessionNotice.sessionId}>Extend 15 min</Button>
-            <Button size="sm" variant="outline" className="border-current/25 bg-card/50" onClick={() => closeSession()}><XCircle className="size-3.5" />Close session</Button>
-          </>}
-        </div>}
-        {sessionNotice.expiresAt && <p className="mt-2 text-xs opacity-80">Expires {new Date(sessionNotice.expiresAt).toLocaleTimeString()}</p>}
-      </Notice>}
+      {sessionNotice && (!sessionNotice.sessionId || localSessionActive) && <div className="px-6 pt-4"><Notice type={sessionNotice.type} title={sessionNotice.title} onClose={() => setSessionNotice(null)}><p>{sessionNotice.message}</p>{sessionNotice.type !== "success" && sessionNotice.launchUrl && <Button size="sm" variant="outline" className="mt-2 border-current/25 bg-card/50" onClick={() => window.open(sessionNotice.launchUrl, "_blank")}><ExternalLink className="size-3.5" />Open session tab</Button>}</Notice></div>}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="telemetry">Telemetry <span className="font-mono text-[10.5px] opacity-70">{snapshots.length}</span></TabsTrigger>
-          <TabsTrigger value="history"><History className="size-3.5" />History</TabsTrigger>
-          <TabsTrigger value="sessions">Sessions <span className="font-mono text-[10.5px] opacity-70">{sessionCount}</span></TabsTrigger>
-        </TabsList>
+        <TabsList className="w-full gap-5 bg-card px-6"><TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="telemetry">Telemetry <span className="font-mono text-[11px] opacity-70">{snapshots.length}</span></TabsTrigger><TabsTrigger value="history">History</TabsTrigger><TabsTrigger value="sessions">Sessions <span className="font-mono text-[11px] opacity-70">{sessionCount}</span></TabsTrigger><TabsTrigger value="audit">Audit</TabsTrigger></TabsList>
 
-        <TabsContent value="overview" className="mt-4">
-          <div className="grid gap-4 lg:grid-cols-[1fr_1.45fr]">
-            <Card>
-              <CardHeader className="border-b border-border"><CardTitle>Device identity</CardTitle><CardDescription>Registration and connectivity details</CardDescription></CardHeader>
-              <CardContent className="p-4"><dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-                {[
-                  ["Serial number", device.serial_number, true],
-                  ["Device name", device.name || "—", false],
-                  ["LAN MAC", device.lan_mac || "—", true],
-                  ["Model", device.model || "Niseva router", false],
-                  ["Firmware", device.firmware_version ? `v${device.firmware_version}` : "—", true],
-                  ["Last communication", device.last_seen ? new Date(device.last_seen).toLocaleString() : "Never", true],
-                ].map(([label, value, mono]) => <div key={String(label)}><dt className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</dt><dd className={cn("mt-1 text-[12.5px] text-foreground/90", mono && "font-mono text-[11px]")}>{value}</dd></div>)}
-                <div className="sm:col-span-2"><dt className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Customer tags</dt><dd className="mt-1.5 flex flex-wrap gap-1.5">{device.tags?.length ? device.tags.map((tag) => <Badge key={tag} variant="secondary" className="font-normal">{tag}</Badge>) : <span className="text-[12px] text-muted-foreground">No tags assigned</span>}{canAdmin && <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setTagEditorOpen(open => !open)}>Edit</Button>}</dd>{tagEditorOpen && <div className="mt-2 flex flex-wrap gap-2 rounded-md border border-border p-2">{tags.filter(tag => tag.organization_id === device.organization_id).map(tag => <button type="button" key={tag.id} onClick={() => toggleTag(tag)} className={cn("rounded-full border px-2 py-1 text-[11px]", device.tags?.includes(tag.name) ? "border-primary bg-accent text-accent-foreground" : "border-border text-muted-foreground")}>{device.tags?.includes(tag.name) ? "✓ " : "+ "}{tag.name}</button>)}</div>}</div>
-                <div className="sm:col-span-2"><dt className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Internal ID</dt><dd className="mt-1 truncate font-mono text-[10.5px] text-muted-foreground" title={device.id}>{device.id}</dd></div>
-              </dl></CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="border-b border-border"><CardTitle>Live telemetry</CardTitle><CardDescription>Values from the most recent snapshot, when available</CardDescription></CardHeader>
-              <CardContent className="space-y-3 p-4">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  <MetricCard label="RSRP" metric={metrics.rsrp} format={(value, unit) => `${displayValue(value)} ${unit || "dBm"}`} meter={metrics.rsrp ? ((numberValue(metrics.rsrp.field.value) ?? -120) + 120) * (100 / 70) : null} />
-                  <MetricCard label="SINR" metric={metrics.sinr} format={(value, unit) => `${displayValue(value)} ${unit || "dB"}`} meter={metrics.sinr ? ((numberValue(metrics.sinr.field.value) ?? 0) + 10) * 4 : null} />
-                  <MetricCard label="CPU" metric={metrics.cpu} format={(value, unit) => `${displayValue(value)}${unit ? ` ${unit}` : "%"}`} meter={metrics.cpu ? numberValue(metrics.cpu.field.value) : null} />
-                  <MetricCard label="Memory" metric={metrics.memory || metrics.memoryPercent} format={(value) => metrics.memory ? formatBytes(value) : `${displayValue(value)} %`} meter={metrics.memoryPercent ? numberValue(metrics.memoryPercent.field.value) : null} />
-                  <MetricCard label="Throughput" metric={metrics.throughput} meter={metrics.throughput ? 48 : null} />
-                  <MetricCard label="Temperature" metric={metrics.temperature} format={(value, unit) => `${displayValue(value)} ${unit || "°C"}`} meter={metrics.temperature ? (numberValue(metrics.temperature.field.value) ?? 0) : null} />
-                </div>
-                <div className="border-t border-border pt-3">
-                  <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Available on this device</div>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    <MetricCard label="RSSI" metric={metrics.rssi} format={(value, unit) => `${displayValue(value)} ${unit || "dBm"}`} />
-                    <MetricCard label="Uptime" metric={metrics.uptime} format={(value) => formatDuration(value)} />
-                    <MetricCard label="Data RX" metric={metrics.rx} format={(value) => formatBytes(value)} />
-                    <MetricCard label="Data TX" metric={metrics.tx} format={(value) => formatBytes(value)} />
-                    <MetricCard label="Registration" metric={metrics.registration} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+        <TabsContent value="overview" className="mt-0">
+          <div className="grid lg:grid-cols-[1fr_1.75fr]">
+            <section className="border-b border-border lg:border-b-0 lg:border-r"><div className="px-6 pb-2 pt-[18px] font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">Identity</div><dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2.5 px-6 pb-5 text-[13px]"><dt className="text-muted-foreground">Serial</dt><dd className="font-mono text-[12px]">{device.serial_number}</dd><dt className="text-muted-foreground">LAN MAC</dt><dd className="font-mono text-[12px]">{device.lan_mac || "—"}</dd><dt className="text-muted-foreground">WAN IP</dt><dd className="font-mono text-[12px]">{networkAddress(device)}</dd><dt className="text-muted-foreground">Model</dt><dd>{device.model || "Unknown model"}</dd><dt className="text-muted-foreground">Firmware</dt><dd className="font-mono text-[12px]">{device.firmware_version ? `v${device.firmware_version}` : "—"}</dd><dt className="text-muted-foreground">Group</dt><dd>{device.groups?.join(", ") || "No group"}</dd><dt className="text-muted-foreground">Tags</dt><dd className="flex flex-wrap gap-1.5">{device.tags?.length ? device.tags.map((tag) => <span key={tag} className="rounded border border-border bg-secondary/50 px-2 py-0.5 text-[12px]">{tag}</span>) : <span className="text-muted-foreground">No tags</span>}{canAdmin && <Button variant="link" size="sm" className="h-auto px-1 text-[12px]" onClick={() => setTagEditorOpen((open) => !open)}>Edit</Button>}</dd><dt className="text-muted-foreground">Enrolled</dt><dd className="font-mono text-[12px]">{device.last_seen ? new Date(device.last_seen).toLocaleDateString() : "—"}</dd></dl>{tagEditorOpen && <div className="mx-6 mb-5 flex flex-wrap gap-2 border-t border-border pt-3">{tags.filter((tag) => tag.organization_id === device.organization_id).map((tag) => <button type="button" key={tag.id} onClick={() => void toggleTag(tag)} className={cn("rounded border px-2 py-1 text-[11px]", device.tags?.includes(tag.name) ? "border-primary bg-accent text-accent-foreground" : "border-border text-muted-foreground")}>{device.tags?.includes(tag.name) ? "✓ " : "+ "}{tag.name}</button>)}</div>}<div className="border-t border-row-divider px-6 pb-5"><div className="pb-2 pt-[18px] font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">Recent activity</div>{device.last_seen ? <div className="flex gap-3 py-1 text-[13px]"><span className="w-[58px] shrink-0 font-mono text-[12px] text-muted-foreground">{new Date(device.last_seen).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span><span>Last contact received</span></div> : <p className="text-[13px] text-muted-foreground">No activity recorded.</p>}</div></section>
+            <section><div className="flex items-center justify-between px-6 pb-2 pt-[18px]"><span className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">Telemetry · latest snapshot</span><span className="text-[13px] text-muted-foreground">{currentSource ? new Date(currentSource.observed_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "No snapshot"}</span></div><div className="grid grid-cols-2 border-t border-border sm:grid-cols-3"><MetricCard label="RSRP" metric={metrics.rsrp} trend={historyTrend(["rsrp"])} format={(value, unit) => `${displayValue(value)} ${unit || "dBm"}`} /><MetricCard label="SINR" metric={metrics.sinr} trend={historyTrend(["sinr"])} format={(value, unit) => `${displayValue(value)} ${unit || "dB"}`} /><MetricCard label="CPU load" metric={metrics.cpu} meter={numberValue(metrics.cpu?.field.value)} format={(value, unit) => `${displayValue(value)}${unit ? ` ${unit}` : "%"}`} /><MetricCard label="Memory" metric={metrics.memory || metrics.memoryPercent} meter={numberValue(metrics.memoryPercent?.field.value)} format={(value) => metrics.memory ? formatBytes(value) : `${displayValue(value)} %`} /><MetricCard label="Temperature" metric={metrics.temperature} trend={historyTrend(["temperature", "temp"])} format={(value, unit) => `${displayValue(value)} ${unit || "°C"}`} /><MetricCard label="Throughput" metric={metrics.throughput} /></div><div className="grid grid-cols-2 gap-4 border-b border-row-divider px-6 py-4 text-[13px] sm:grid-cols-4"><span><span className="block text-muted-foreground">RSSI</span><span className="mt-1 block font-mono text-[12px]">{metrics.rssi ? `${displayValue(metrics.rssi.field.value)} ${metrics.rssi.field.unit || "dBm"}` : "—"}</span></span><span><span className="block text-muted-foreground">Uptime</span><span className="mt-1 block font-mono text-[12px]">{metrics.uptime ? formatDuration(metrics.uptime.field.value) : "—"}</span></span><span><span className="block text-muted-foreground">Data RX</span><span className="mt-1 block font-mono text-[12px]">{metrics.rx ? formatBytes(metrics.rx.field.value) : "—"}</span></span><span><span className="block text-muted-foreground">Registration</span><span className="mt-1 block">{metrics.registration ? displayValue(metrics.registration.field.value) : "—"}</span></span></div></section>
           </div>
         </TabsContent>
 
-        <TabsContent value="telemetry" className="mt-4">
-          {snapshots.length === 0 ? <Card><CardContent className="flex min-h-36 flex-col items-center justify-center gap-1 p-6 text-center"><Loader2 className={cn("mb-1 size-5 text-muted-foreground", loadingSnapshots && "animate-spin")} /><p className="text-[13px] font-medium">No telemetry snapshots collected yet</p><p className="text-xs text-muted-foreground">Assign a monitoring profile to this device to collect periodic telemetry.</p></CardContent></Card> : <div className="flex flex-col gap-4">{snapshots.map((snapshot) => <Card key={snapshot.source_id}>
-            <CardHeader className="flex-row items-start justify-between border-b border-border"><div><CardTitle>{snapshot.definition?.name || snapshot.source_id}</CardTitle><CardDescription className="mt-1">Observed {new Date(snapshot.observed_at).toLocaleString()}</CardDescription></div><Badge variant={snapshot.status === "ok" ? "ok" : "down"}>{snapshot.status} · {snapshot.stale ? "stale" : "fresh"}</Badge></CardHeader>
-            <CardContent className="p-0">{snapshot.error && <div className="m-4 rounded-md border border-down-border bg-down-bg px-3 py-2 text-[12px] text-down">{snapshot.error}</div>}<div className="max-h-[520px] overflow-auto"><Table><TableHeader><TableRow><TableHead>Metric</TableHead><TableHead>Current value</TableHead><TableHead>Type</TableHead></TableRow></TableHeader><TableBody>{Object.entries(snapshot.fields || {}).map(([id, field]) => <TableRow key={id}><TableCell className="font-medium">{field.label || id}</TableCell><TableCell className="font-mono text-[11px]">{displayValue(field.value)} {field.unit || ""}</TableCell><TableCell><Badge variant="secondary" className="font-normal capitalize">{field.kind || "text"}</Badge></TableCell></TableRow>)}</TableBody></Table></div></CardContent>
-          </Card>)}</div>}
-        </TabsContent>
+        <TabsContent value="telemetry" className="mt-0 px-6 py-4">{snapshots.length === 0 ? <section className="flex min-h-36 flex-col items-center justify-center gap-1 border border-border bg-card p-6 text-center"><Loader2 className={cn("mb-1 size-5 text-muted-foreground", loadingSnapshots && "animate-spin")} /><p className="text-[13px] font-medium">No telemetry snapshots collected yet</p><p className="text-[13px] text-muted-foreground">Assign a monitoring profile to this device to collect periodic telemetry.</p></section> : <div className="flex flex-col gap-4">{snapshots.map((snapshot) => <section key={snapshot.source_id} className="overflow-hidden border border-border bg-card"><div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3.5"><div><h2 className="font-display text-sm font-semibold">{snapshot.definition?.name || snapshot.source_id}</h2><p className="mt-1 text-xs text-muted-foreground">Observed {new Date(snapshot.observed_at).toLocaleString()}</p></div><Badge variant={snapshot.status === "ok" ? "ok" : "down"}>{snapshot.status} · {snapshot.stale ? "stale" : "fresh"}</Badge></div>{snapshot.error && <div className="m-4 rounded-md border border-down-border bg-down-bg px-3 py-2 text-[12px] text-down">{snapshot.error}</div>}<div className="max-h-[520px] overflow-auto"><table className="w-full text-[13px]"><thead className="border-b border-border bg-secondary/40 text-left font-mono text-[11px] uppercase tracking-wide text-muted-foreground"><tr><th className="px-4 py-2.5">Metric</th><th className="px-4 py-2.5">Current value</th><th className="px-4 py-2.5">Type</th></tr></thead><tbody>{Object.entries(snapshot.fields || {}).map(([id, field]) => <tr key={id} className="border-b border-row-divider"><td className="px-4 py-3 font-medium">{field.label || id}</td><td className="px-4 py-3 font-mono text-[12px]">{displayValue(field.value)} {field.unit || ""}</td><td className="px-4 py-3"><Badge variant="secondary" className="font-normal capitalize">{field.kind || "text"}</Badge></td></tr>)}</tbody></table></div></section>)}</div>}</TabsContent>
 
-        <TabsContent value="history" className="mt-4">
-          <Card>
-            <CardHeader className="border-b border-border"><CardTitle>Historical telemetry</CardTitle><CardDescription>Plot a numeric field from the selected monitoring source.</CardDescription></CardHeader>
-            <CardContent className="p-4">
-              <div className="flex flex-wrap gap-2">
-                <select aria-label="Select telemetry source" value={selectedSource} onChange={(event) => { setSelectedSource(event.target.value); setSelectedField(""); }} className="h-9 min-w-[220px] rounded-md border border-input bg-card px-3 text-[12px] text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/25"><option value="">Select telemetry source</option>{snapshots.map((snapshot) => <option key={snapshot.source_id} value={snapshot.source_id}>{snapshot.definition?.name || snapshot.source_id}</option>)}</select>
-                <select aria-label="Select metric field" value={selectedField} onChange={(event) => setSelectedField(event.target.value)} disabled={!selectedSource || numericFieldOptions.length === 0} className="h-9 min-w-[220px] rounded-md border border-input bg-card px-3 text-[12px] text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50"><option value="">Select metric to plot</option>{numericFieldOptions.map(([id, field]) => <option key={id} value={id}>{field.label || id}</option>)}</select>
-              </div>
-              {selectedField ? <div className="mt-5 h-[280px] w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey="time" stroke="var(--muted-foreground)" tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} tickLine={false} axisLine={false} /><YAxis stroke="var(--muted-foreground)" tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} tickLine={false} axisLine={false} /><Tooltip contentStyle={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--popover)", color: "var(--popover-foreground)", fontSize: 12 }} /><Area type="monotone" dataKey="value" stroke="none" fill="var(--accent)" fillOpacity={0.75} /><Line type="monotone" dataKey="value" stroke="var(--chart-2)" strokeWidth={2} dot={{ r: 2, fill: "var(--chart-2)" }} activeDot={{ r: 4, fill: "var(--chart-2)" }} connectNulls={false} /></LineChart></ResponsiveContainer></div> : <div className="mt-5 rounded-lg border border-dashed border-border px-4 py-10 text-center text-[12px] text-muted-foreground">Select a numeric metric above to view its historical time series.</div>}
-              <div className="mt-6 flex items-center gap-2 text-[12px] font-semibold text-foreground"><History className="size-4 text-primary" />Snapshot history log</div>
-              <div className="mt-2 max-h-[520px] overflow-auto rounded-lg border border-border"><Table><TableHeader><TableRow><TableHead>Observed time</TableHead><TableHead>Status</TableHead><TableHead>Values snapshot</TableHead></TableRow></TableHeader><TableBody>{loadingHistory ? <TableRow><TableCell colSpan={3} className="h-20 text-center text-xs text-muted-foreground">Loading history…</TableCell></TableRow> : historyData.slice(0, 50).map((history, index) => <TableRow key={`${history.observed_at}-${index}`}><TableCell className="whitespace-nowrap font-mono text-[10.5px]">{new Date(history.observed_at).toLocaleString()}</TableCell><TableCell><Badge variant={history.status === "ok" ? "ok" : "down"}>{history.status}</Badge></TableCell><TableCell className="max-w-[520px] truncate font-mono text-[10.5px] text-muted-foreground" title={JSON.stringify(history.fields)}>{JSON.stringify(history.fields)}</TableCell></TableRow>)}</TableBody></Table></div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <TabsContent value="history" className="mt-0 px-6 py-4"><section className="border border-border bg-card"><div className="border-b border-border px-4 py-3.5"><h2 className="font-display text-sm font-semibold">Historical telemetry</h2><p className="mt-1 text-xs text-muted-foreground">Plot a numeric field from the selected monitoring source.</p></div><div className="p-4"><div className="flex flex-wrap gap-2"><select aria-label="Select telemetry source" value={selectedSource} onChange={(event) => { setSelectedSource(event.target.value); setSelectedField(""); }} className="h-9 min-w-[220px] rounded-md border border-input bg-card px-3 text-[12px] text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/25"><option value="">Select telemetry source</option>{snapshots.map((snapshot) => <option key={snapshot.source_id} value={snapshot.source_id}>{snapshot.definition?.name || snapshot.source_id}</option>)}</select><select aria-label="Select metric field" value={selectedField} onChange={(event) => setSelectedField(event.target.value)} disabled={!selectedSource || numericFieldOptions.length === 0} className="h-9 min-w-[220px] rounded-md border border-input bg-card px-3 text-[12px] text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50"><option value="">Select metric to plot</option>{numericFieldOptions.map(([id, field]) => <option key={id} value={id}>{field.label || id}</option>)}</select></div>{selectedField ? <div className="mt-5 h-[280px] w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey="time" stroke="var(--muted-foreground)" tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} tickLine={false} axisLine={false} /><YAxis stroke="var(--muted-foreground)" tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} tickLine={false} axisLine={false} /><Tooltip contentStyle={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--popover)", color: "var(--popover-foreground)", fontSize: 12 }} /><Area type="monotone" dataKey="value" stroke="none" fill="var(--accent)" fillOpacity={0.75} /><Line type="monotone" dataKey="value" stroke="var(--chart-2)" strokeWidth={2} dot={{ r: 2, fill: "var(--chart-2)" }} activeDot={{ r: 4, fill: "var(--chart-2)" }} connectNulls={false} /></LineChart></ResponsiveContainer></div> : <div className="mt-5 rounded-md border border-dashed border-border px-4 py-10 text-center text-[13px] text-muted-foreground">Select a numeric metric above to view its historical time series.</div>}<div className="mt-6 flex items-center gap-2 text-[12px] font-semibold"><History className="size-4 text-primary" />Snapshot history log</div><div className="mt-2 overflow-hidden rounded-md border border-border"><table className="w-full text-[13px]"><thead className="border-b border-border bg-secondary/40 text-left font-mono text-[11px] uppercase tracking-wide text-muted-foreground"><tr><th className="w-8 px-3" /><th className="px-3 py-2.5">Observed time</th><th className="px-3 py-2.5">Status</th><th className="px-3 py-2.5">Fields</th></tr></thead><tbody>{loadingHistory ? <tr><td colSpan={4} className="h-20 px-3 text-center text-xs text-muted-foreground">Loading history…</td></tr> : historyData.slice(0, 50).map((history, index) => { const rowId = `${history.observed_at}-${index}`; const expanded = expandedHistory === rowId; return <React.Fragment key={rowId}><tr className="border-b border-row-divider hover:bg-secondary/30"><td className="px-3"><button type="button" aria-label={expanded ? "Collapse history row" : "Expand history row"} onClick={() => setExpandedHistory(expanded ? null : rowId)}><ChevronDown className={cn("size-4 transition-transform", expanded && "rotate-180")} /></button></td><td className="whitespace-nowrap px-3 py-3 font-mono text-[11px]">{new Date(history.observed_at).toLocaleString()}</td><td className="px-3 py-3"><Badge variant={history.status === "ok" ? "ok" : "down"}>{history.status}</Badge></td><td className="max-w-[520px] truncate px-3 py-3 text-muted-foreground">{Object.keys(history.fields ?? {}).length} metrics</td></tr>{expanded && <tr className="border-b border-row-divider bg-secondary/20"><td colSpan={4} className="px-6 py-3"><div className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(history.fields ?? {}).map(([id, field]) => <div key={id} className="min-w-0"><span className="block truncate text-[11px] text-muted-foreground">{field.label || id}</span><span className="font-mono text-[12px]">{displayValue(field.value)} {field.unit || ""}</span></div>)}</div></td></tr>}</React.Fragment>; })}</tbody></table></div></div></section></TabsContent>
 
-        <TabsContent value="sessions" className="mt-4">
-          <Card><CardHeader className="border-b border-border"><CardTitle>Remote sessions</CardTitle><CardDescription>Active sessions connected to this device.</CardDescription></CardHeader><CardContent className="space-y-2 p-4">{localSessionActive ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ok-border bg-ok-bg p-3"><div><div className="flex items-center gap-2 text-[12px] text-ok"><CheckCircle2 className="size-4" /><span>Session {sessionNotice!.sessionId!.slice(0, 12)}… is active.</span></div>{sessionNotice!.expiresAt && <p className="mt-1 pl-6 text-[11px] text-ok/80">Expires {new Date(sessionNotice!.expiresAt).toLocaleTimeString()}</p>}</div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => extendSession(sessionNotice!.sessionId!)} disabled={sessionActionId === sessionNotice!.sessionId}>Extend 15 min</Button><Button variant="outline" size="sm" onClick={() => closeSession()}><XCircle className="size-3.5" />Close session</Button></div></div> : activeSessions.length ? activeSessions.map((session) => <div key={session.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ok-border bg-ok-bg p-3"><div><div className="flex items-center gap-2 text-[12px] text-ok"><CheckCircle2 className="size-4" /><span>{session.protocol === "TERMINAL_SSH" ? "Terminal" : "LuCI"} session {session.id.slice(0, 12)}… is active.</span></div><p className="mt-1 pl-6 text-[11px] text-ok/80">Expires {new Date(session.expires_at).toLocaleTimeString()}</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => extendSession(session.id)} disabled={sessionActionId === session.id}>Extend 15 min</Button><Button variant="outline" size="sm" onClick={() => closeSession(session.id)}><XCircle className="size-3.5" />Close session</Button></div></div>) : <div className="flex flex-col items-center justify-center gap-2 py-8 text-center"><Code2 className="size-6 text-muted-foreground/60" /><p className="text-[13px] font-medium">No active session</p><p className="max-w-[420px] text-xs text-muted-foreground">Start LuCI or a terminal session from the remote management card above.</p></div>}</CardContent></Card>
-        </TabsContent>
+        <TabsContent value="sessions" className="mt-0 px-6 py-4"><section className="border border-border bg-card"><div className="border-b border-border px-4 py-3.5"><h2 className="font-display text-sm font-semibold">Remote sessions</h2><p className="mt-1 text-xs text-muted-foreground">Active sessions connected to this device.</p></div><div className="space-y-2 p-4">{activeSessions.length ? activeSessions.map((session) => <div key={session.id} className="flex flex-wrap items-center justify-between gap-3 border-l-[3px] border-l-ok bg-session-ok-bg p-3"><div><div className="flex items-center gap-2 text-[13px] text-ok"><CheckCircle2 className="size-4" />{session.protocol === "TERMINAL_SSH" ? "Terminal" : "LuCI"} session is active</div><p className="mt-1 pl-6 font-mono text-[11px] text-ok/80">Expires {new Date(session.expires_at).toLocaleTimeString()}</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => void extendSession(session.id)} disabled={sessionActionId === session.id}>Extend 15 min</Button><Button variant="outline" size="sm" onClick={() => void closeSession(session.id)}><XCircle className="size-3.5" />Close session</Button></div></div>) : <div className="flex flex-col items-center justify-center gap-2 py-8 text-center"><Code2 className="size-6 text-muted-foreground/60" /><p className="text-[13px] font-medium">No active session</p><p className="text-[13px] text-muted-foreground">Start LuCI or a terminal session from the header.</p></div>}</div></section></TabsContent>
+
+        <TabsContent value="audit" className="mt-0 px-6 py-4"><section className="border border-border bg-card p-6"><h2 className="font-display text-sm font-semibold">Audit trail</h2><p className="mt-1 text-[13px] text-muted-foreground">Audit events are available from the Audit records area. This device view does not currently receive an audit feed.</p></section></TabsContent>
       </Tabs>
 
       <ConfirmDialog open={revokeOpen} onOpenChange={setRevokeOpen} title="Revoke this router’s access?" description="The router certificate will be revoked immediately and this device will not be able to reconnect." confirmLabel="Revoke access" onConfirm={revokeDevice} />

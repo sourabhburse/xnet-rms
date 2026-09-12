@@ -68,7 +68,7 @@ export function AppShell({
   };
 
   return (
-    <div className="grid h-screen grid-cols-1 overflow-hidden bg-background lg:grid-cols-[248px_1fr]">
+    <div className="grid h-screen grid-cols-1 overflow-hidden bg-background lg:grid-cols-[232px_1fr]">
       <div className="hidden min-h-0 lg:block">
         <AppSidebar
           user={user}
