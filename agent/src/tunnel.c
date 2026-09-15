@@ -14,12 +14,13 @@
 #define RMS_SSH_RAM_KEYS "/tmp/rms-ssh/authorized_keys"
 #define DROPBEAR_AUTH_KEYS "/etc/dropbear/authorized_keys"
 
-int rms_tunnel_worker(const char *,const char *,const char *,int);
+int rms_tunnel_worker(const char *,const char *,const char *,int,int);
 static pid_t tunnel_pid=0;
 static struct uloop_timeout ttl;
 static int running;
 static int s_mounted=0;
 static char active_session_id[33];
+static int control_pipe[2]={-1,-1};
 
 static int write_all(int fd, const void *data, size_t len) {
     const char *p = data;
@@ -110,19 +111,45 @@ int open_reverse_tunnel(const char *id,const char *protocol,const char *url,int 
     if(!strcmp(protocol, "TERMINAL_SSH") || !strcmp(protocol, "SSH_LUCI")) {
         if (!public_key || rms_ssh_inject_key(id, public_key) != 0) return -1;
     }
+    if (pipe(control_pipe) != 0) {
+        rms_ssh_cleanup_key();
+        return -1;
+    }
     pid_t pid=fork();
     if(pid<0) {
+        close(control_pipe[0]);
+        close(control_pipe[1]);
+        control_pipe[0]=control_pipe[1]=-1;
         rms_ssh_cleanup_key();
         return -1;
     }
     if(pid==0){
-        for(int fd=3;fd<1024;fd++)close(fd);
-        _exit(rms_tunnel_worker(id,protocol,url,seconds)==0?0:1);
+        close(control_pipe[1]);
+        for(int fd=3;fd<1024;fd++)if(fd!=control_pipe[0])close(fd);
+        _exit(rms_tunnel_worker(id,protocol,url,seconds,control_pipe[0])==0?0:1);
     }
+    close(control_pipe[0]);
+    control_pipe[0]=-1;
     tunnel_pid=pid;
     running=1;
     snprintf(active_session_id,sizeof(active_session_id),"%s",id);
     ttl.cb=expire;
+    uloop_timeout_set(&ttl,seconds*1000);
+    return 0;
+}
+
+int extend_reverse_tunnel_session(const char *id,int seconds){
+    if(!running||tunnel_pid<=0||control_pipe[1]<0||!rms_id(id)||strcmp(active_session_id,id)!=0||seconds<1||seconds>3600)return -1;
+    /* The worker may have exited between the MQTT callback and the main-loop
+     * reap. Do not let a closed control pipe terminate the agent with SIGPIPE. */
+    signal(SIGPIPE,SIG_IGN);
+    char message[64];
+    time_t deadline=time(NULL)+seconds;
+    int n=snprintf(message,sizeof(message),"EXTEND %lld\n",(long long)deadline);
+    if(n<0||n>=(int)sizeof(message))return -1;
+    ssize_t sent;
+    do { sent=write(control_pipe[1],message,(size_t)n); } while(sent<0&&errno==EINTR);
+    if(sent!=n)return -1;
     uloop_timeout_set(&ttl,seconds*1000);
     return 0;
 }
@@ -136,6 +163,8 @@ void check_reverse_tunnel(void){
             running=0;
             active_session_id[0]=0;
             uloop_timeout_cancel(&ttl);
+            if(control_pipe[1]>=0)close(control_pipe[1]);
+            control_pipe[0]=control_pipe[1]=-1;
             rms_ssh_cleanup_key();
         }
     }
@@ -150,6 +179,9 @@ void close_reverse_tunnel(void){
         }
         running=0;
     }
+    if(control_pipe[1]>=0)close(control_pipe[1]);
+    if(control_pipe[0]>=0)close(control_pipe[0]);
+    control_pipe[0]=control_pipe[1]=-1;
     active_session_id[0]=0;
     uloop_timeout_cancel(&ttl);
     rms_ssh_cleanup_key();

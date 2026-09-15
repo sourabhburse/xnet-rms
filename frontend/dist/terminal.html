@@ -1,5 +1,65 @@
-<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>XNET remote terminal</title>  <script type="module" crossorigin src="/assets/terminal-B_KAmpOK.js"></script>
-  <link rel="modulepreload" crossorigin href="/assets/globals-C2Bjp4WU.js">
-  <link rel="stylesheet" crossorigin href="/assets/globals-BFKY6SjN.css">
-  <link rel="stylesheet" crossorigin href="/assets/terminal-D-ZW5A_j.css">
-</head><body><div id="terminal"></div></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#203864">
+    <title>XNET remote terminal</title>
+    <script type="module" crossorigin src="/assets/terminal-Ct5z7LTb.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/globals-BCmtEm7w.js">
+    <link rel="stylesheet" crossorigin href="/assets/globals-BvKBfTu6.css">
+    <link rel="stylesheet" crossorigin href="/assets/terminal-D-ZW5A_j.css">
+  </head>
+  <body>
+    <div class="terminal-app">
+      <header class="terminal-header">
+        <div class="terminal-brand">
+          <div class="terminal-brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+          <div>
+            <div class="terminal-brand-name">XNET RMS</div>
+            <div class="terminal-brand-caption">Secure remote access</div>
+          </div>
+        </div>
+        <div class="terminal-header-actions">
+          <div id="session-expiry" class="session-expiry" data-expires-at="__XNET_SESSION_EXPIRES_AT__" aria-live="polite"><span class="session-expiry-copy"><span class="session-expiry-label">Time remaining</span><strong id="session-expiry-value">—</strong></span><button id="session-extend" class="session-extend" type="button">Extend 15 min</button></div>
+          <div id="connection-badge" class="connection-badge" data-state="connecting"><span class="connection-dot"></span><span id="connection-label">Connecting</span></div>
+          <button id="close-window" class="terminal-close" type="button">Close tab</button>
+        </div>
+      </header>
+
+      <main class="terminal-main">
+        <section class="terminal-card" aria-label="Remote terminal">
+          <div class="terminal-card-header">
+            <div class="terminal-heading">
+              <div class="terminal-heading-icon" aria-hidden="true">&gt;_</div>
+              <div>
+                <h1>Remote terminal</h1>
+                <p>Interactive shell through an encrypted XNET RMS tunnel.</p>
+              </div>
+            </div>
+            <div class="terminal-session-meta"><span class="meta-label">SESSION</span><span id="session-host">__XNET_DEVICE_NAME__</span><span id="session-serial">__XNET_DEVICE_SERIAL__</span></div>
+          </div>
+          <div class="terminal-surface-wrap">
+            <div class="terminal-device-details">
+              <div><span class="device-detail-label">Device</span><strong id="device-name">__XNET_DEVICE_NAME__</strong></div>
+              <div><span class="device-detail-label">Serial number</span><strong id="device-serial">__XNET_DEVICE_SERIAL__</strong></div>
+              <div><span class="device-detail-label">Model</span><strong id="device-model">__XNET_DEVICE_MODEL__</strong></div>
+              <div><span class="device-detail-label">Firmware</span><strong id="device-firmware">__XNET_DEVICE_FIRMWARE__</strong></div>
+            </div>
+            <div id="terminal" aria-label="Interactive remote terminal"></div>
+            <div id="terminal-state" class="terminal-state" hidden>
+              <div class="terminal-state-icon" aria-hidden="true">&gt;_</div>
+              <h2 id="terminal-state-title">Session ended</h2>
+              <p id="terminal-state-message">The secure tunnel is no longer available.</p>
+              <div class="terminal-state-actions">
+                <button id="retry-connection" class="terminal-action primary" type="button" hidden>Try again</button>
+                <button id="state-close-window" class="terminal-action" type="button">Close tab</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <div class="terminal-footer"><span><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd> closes the tab</span><span>Session time remaining is shown above.</span></div>
+      </main>
+    </div>
+  </body>
+</html>

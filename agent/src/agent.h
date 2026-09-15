@@ -10,7 +10,7 @@
 #include <time.h>
 #include "parson.h"
 
-#define AGENT_VERSION "2.1.2"
+#define AGENT_VERSION "2.3.0"
 #define DEFAULT_SERVER ""
 #define DEFAULT_MQTT_HOST ""
 #define DEFAULT_MQTT_PORT 8883
@@ -79,6 +79,7 @@ int init_mqtt(void);
 void send_heartbeat(struct uloop_timeout *t);
 void collect_and_send_telemetry(struct uloop_timeout *t);
 void handle_telemetry_ack(const char *payload);
+int rms_preview_collect(const char *request_id, JSON_Array *collector_ids);
 
 // Bounded Telemetry Buffer Queue (2 MiB)
 void telemetry_queue_init(void);
@@ -97,8 +98,9 @@ void check_rollback_watchdog(struct uloop_timeout *t);
 void cancel_rollback_watchdog(void);
 void handle_sysupgrade(const char *url, const char *sha256);
 
-// Remote Access Tunnel (LuCI SSO & Dropbear SSH Bridge)
+// Remote Access Tunnel (router-login LuCI & Dropbear SSH Bridge)
 int open_reverse_tunnel(const char *session_id, const char *protocol, const char *gateway_url, int ttl_seconds, const char *public_key);
+int extend_reverse_tunnel_session(const char *session_id, int ttl_seconds);
 void check_reverse_tunnel(void);
 void close_reverse_tunnel(void);
 int close_reverse_tunnel_session(const char *session_id);

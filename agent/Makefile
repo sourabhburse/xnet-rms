@@ -1,8 +1,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=niseva-agent
-PKG_VERSION:=2.1.0
-PKG_RELEASE:=2
+PKG_VERSION:=2.3.0
+PKG_RELEASE:=1
 
 PKG_MAINTAINER:=Niseva Engineering <support@niseva.com>
 PKG_LICENSE:=Proprietary
@@ -37,6 +37,8 @@ endef
 define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/usr/libexec/xnet-rms
 	$(INSTALL_BIN) ./files/ipsec.lua $(1)/usr/libexec/xnet-rms/ipsec.lua
+	$(INSTALL_BIN) ./files/device-overview.sh $(1)/usr/libexec/xnet-rms/device-overview.sh
+	$(INSTALL_BIN) ./files/modbus-health.sh $(1)/usr/libexec/xnet-rms/modbus-health.sh
 	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
 	$(INSTALL_DATA) ./files/niseva.keep $(1)/lib/upgrade/keep.d/niseva-agent
 	$(INSTALL_DIR) $(1)/etc/xnet-rms/collectors

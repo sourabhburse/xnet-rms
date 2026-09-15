@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/gorilla/websocket"
+	"html"
 	"io"
 	"io/fs"
 	"log"
@@ -80,8 +81,13 @@ func (g *Gateway) ensureLuciSSH(p *Pair) error {
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return client.Dial("tcp", "127.0.0.1:80")
 			},
-			MaxIdleConns:        8,
-			MaxIdleConnsPerHost: 8,
+			// The OpenWrt uhttpd configuration on the XE33 2S allows three
+			// concurrent requests (max_requests=3).  Letting the browser open
+			// eight SSH direct-tcpip channels at once makes uhttpd reject one of
+			// LuCI's module requests, leaving the page stuck while collecting data.
+			MaxConnsPerHost:     3,
+			MaxIdleConns:        3,
+			MaxIdleConnsPerHost: 3,
 			IdleConnTimeout:     30 * time.Second,
 		}
 		p.mu.Lock()
@@ -115,6 +121,174 @@ func copyLuciResponseHeaders(dst, src http.Header) {
 	}
 }
 
+func injectLuciLoadingFallback(body []byte) []byte {
+	lower := bytes.ToLower(body)
+	marker := []byte("</head>")
+	idx := bytes.Index(lower, marker)
+	if idx < 0 {
+		return body
+	}
+	const fallback = `<style id="xnet-rms-loading-fallback">.main > .loading{display:none!important}</style>`
+	out := make([]byte, 0, len(body)+len(fallback))
+	out = append(out, body[:idx]...)
+	out = append(out, fallback...)
+	out = append(out, body[idx:]...)
+	return out
+}
+
+const luciSessionChromeTemplate = `
+<style id="xnet-rms-session-style">
+#xnet-rms-session-indicator{--session-progress:1;position:fixed;right:16px;bottom:16px;z-index:2147483647;display:flex;min-width:116px;max-width:calc(100vw - 32px);flex-direction:column;padding:2px;border:2px solid transparent;border-radius:13px;background:linear-gradient(#fff,#fff) padding-box,conic-gradient(#3f6bb0 calc(var(--session-progress)*1turn),#dce4f0 0) border-box;box-shadow:0 8px 24px rgba(32,56,100,.18);font:12px/1.3 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;transition:transform .18s ease,box-shadow .18s ease}
+#xnet-rms-session-indicator:hover,#xnet-rms-session-indicator:focus-within{transform:translateY(-2px);box-shadow:0 12px 28px rgba(32,56,100,.24)}
+#xnet-rms-session-indicator .xnet-rms-session-summary{display:flex;align-items:center;gap:7px;border-radius:9px;padding:5px 7px;color:#203864;background:#fff}
+#xnet-rms-session-indicator .xnet-rms-session-mark{display:block;width:30px;height:16px;flex:0 0 auto;transform-origin:center;animation:xnet-rms-session-breathe 2s ease-in-out infinite}
+#xnet-rms-session-indicator .xnet-rms-session-copy{display:flex;min-width:0;flex-direction:column;gap:1px}
+#xnet-rms-session-indicator .xnet-rms-session-copy strong{font-size:10px;white-space:nowrap}
+#xnet-rms-session-indicator .xnet-rms-session-time{white-space:nowrap;color:#203864;font-family:ui-monospace,monospace;font-size:12px;font-weight:700}
+#xnet-rms-session-indicator .xnet-rms-session-panel{display:none;align-items:center;justify-content:space-between;gap:7px;padding:6px 7px 5px}
+#xnet-rms-session-indicator:hover .xnet-rms-session-panel,#xnet-rms-session-indicator:focus-within .xnet-rms-session-panel{display:flex}
+#xnet-rms-session-indicator .xnet-rms-session-device{overflow:hidden;color:#687792;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
+#xnet-rms-session-indicator .xnet-rms-session-extend{flex:0 0 auto;border:0;border-radius:6px;padding:5px 7px;color:#fff;background:#203864;font:inherit;font-size:10px;font-weight:600;cursor:pointer}
+#xnet-rms-session-indicator .xnet-rms-session-extend:hover{background:#2e5496}
+#xnet-rms-session-indicator .xnet-rms-session-extend:disabled{cursor:wait;opacity:.6}
+#xnet-rms-session-indicator[data-state="warning"] .xnet-rms-session-time{color:#a15d00}
+@keyframes xnet-rms-session-breathe{0%,100%{transform:scale(.94);filter:drop-shadow(0 0 0 rgba(102,139,206,0))}50%{transform:scale(1.05);filter:drop-shadow(0 0 8px rgba(102,139,206,.38))}}
+@media(prefers-reduced-motion:reduce){#xnet-rms-session-indicator .xnet-rms-session-mark{animation:none}}
+@media(max-width:560px){#xnet-rms-session-indicator{right:8px;bottom:8px;min-width:108px}#xnet-rms-session-indicator .xnet-rms-session-device{max-width:120px}}
+</style>
+<div id="xnet-rms-session-indicator" data-expires-at="__XNET_SESSION_EXPIRES_AT__" role="region" aria-label="RMS remote session">
+<div class="xnet-rms-session-summary" aria-label="Session time remaining">
+<span class="xnet-rms-session-logo"><svg viewBox="0 0 62 24" role="img" aria-label="XNET" class="xnet-rms-session-mark" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" fill="#203864" r="11"></circle><circle cx="24" cy="12" fill="#2e5496" r="11"></circle><circle cx="36" cy="12" fill="#3f6bb0" r="11"></circle><circle cx="48" cy="12" fill="#668bce" r="11"></circle></svg></span>
+<span class="xnet-rms-session-copy"><strong>Session</strong><span id="xnet-rms-session-time" class="xnet-rms-session-time" role="status" aria-live="polite">--:--</span></span>
+</div>
+<div id="xnet-rms-session-panel" class="xnet-rms-session-panel"><span class="xnet-rms-session-device">__XNET_DEVICE_NAME_HTML__</span><button id="xnet-rms-session-extend" class="xnet-rms-session-extend" type="button">Extend 15 min</button></div>
+</div>
+<script>
+(() => {
+  const indicator = document.getElementById("xnet-rms-session-indicator");
+  const time = document.getElementById("xnet-rms-session-time");
+  const extendButton = document.getElementById("xnet-rms-session-extend");
+  if (!indicator || !time || !extendButton) return;
+  let expiresAt = Number(indicator.dataset.expiresAt || 0);
+  let ended = false;
+  const homeUrl = __XNET_RMS_HOME__;
+  const formatRemaining = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return minutes + ":" + String(remainder).padStart(2, "0");
+  };
+  const showEnded = () => {
+    if (ended) return;
+    ended = true;
+    document.title = "Remote session ended · XNET RMS";
+    const style = document.createElement("style");
+    style.textContent = "#xnet-rms-ended{display:grid;place-items:center;min-height:100vh;padding:24px;box-sizing:border-box;background:radial-gradient(circle at 8% 0%,rgba(102,139,206,.16),transparent 31rem),#f5f6f9;color:#191c23;font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,\"Segoe UI\",sans-serif}#xnet-rms-ended .card{width:min(520px,100%);padding:32px;border:1px solid #e5e7ec;border-radius:14px;background:#fff;box-shadow:0 14px 40px rgba(25,28,35,.08);text-align:center}#xnet-rms-ended .mark{display:block;width:62px;height:24px;margin:0 auto 20px;animation:xnet-rms-ended-breathe 2s ease-in-out infinite}#xnet-rms-ended h1{margin:0;font-size:22px;color:#203864}#xnet-rms-ended p{margin:10px auto 0;max-width:420px;color:#6d7482;font-size:13px}#xnet-rms-ended .details{margin:20px 0 0;padding:12px 14px;border-radius:9px;background:#f5f6f9;color:#6d7482;font-size:12px}#xnet-rms-ended .actions{display:flex;justify-content:center;gap:8px;margin-top:22px;flex-wrap:wrap}#xnet-rms-ended a,#xnet-rms-ended button{display:inline-flex;align-items:center;justify-content:center;min-width:122px;min-height:38px;border:1px solid #d8dce5;border-radius:7px;padding:9px 13px;color:#203864;background:#fff;font:inherit;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer}#xnet-rms-ended a{border-color:#203864;color:#fff;background:#203864}@keyframes xnet-rms-ended-breathe{0%,100%{transform:scale(.94)}50%{transform:scale(1.05)}}@media(prefers-reduced-motion:reduce){#xnet-rms-ended .mark{animation:none}}";
+    document.head.appendChild(style);
+    document.body.innerHTML = '<main id="xnet-rms-ended"><section class="card"><svg viewBox="0 0 62 24" role="img" aria-label="XNET" class="mark" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" fill="#203864" r="11"></circle><circle cx="24" cy="12" fill="#2e5496" r="11"></circle><circle cx="36" cy="12" fill="#3f6bb0" r="11"></circle><circle cx="48" cy="12" fill="#668bce" r="11"></circle></svg><h1>Remote session ended</h1><p>The secure router tunnel has closed or expired. Your router login was not changed.</p><div class="details"><strong id="xnet-rms-ended-device"></strong><br><span id="xnet-rms-ended-serial"></span></div><div class="actions"><a id="xnet-rms-ended-home" href="#">Open XNET RMS</a><button type="button" onclick="window.close();this.textContent=\'You can close this tab\'">Close tab</button></div></section></main>';
+    document.getElementById("xnet-rms-ended-device").textContent = __XNET_DEVICE_NAME_JSON__;
+    document.getElementById("xnet-rms-ended-serial").textContent = "Serial: " + __XNET_DEVICE_SERIAL_JSON__;
+    const home = document.getElementById("xnet-rms-ended-home");
+    if (homeUrl) home.href = homeUrl;
+    else home.hidden = true;
+  };
+  const renderRemaining = () => {
+    if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+      time.textContent = "Time remaining: unavailable";
+      return;
+    }
+    const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+    if (seconds === 0) {
+      showEnded();
+      return;
+    }
+    indicator.style.setProperty("--session-progress", String(Math.min(1, seconds / 900)));
+    indicator.dataset.state = seconds <= 60 ? "warning" : "active";
+    time.textContent = formatRemaining(seconds);
+  };
+  const extendSession = async () => {
+    if (ended || extendButton.disabled) return;
+    extendButton.disabled = true;
+    extendButton.textContent = "Extending…";
+    try {
+      const response = await fetch("/__rms/session-extend", { method: "POST", cache: "no-store", credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.expires_at) throw new Error("extension unavailable");
+      const nextExpiry = Date.parse(payload.expires_at);
+      if (!Number.isFinite(nextExpiry)) throw new Error("invalid expiry");
+      expiresAt = nextExpiry;
+      extendButton.textContent = "Extended";
+      renderRemaining();
+    } catch (_) {
+      extendButton.textContent = "Try again";
+    } finally {
+      window.setTimeout(() => {
+        if (!ended) {
+          extendButton.disabled = false;
+          extendButton.textContent = "Extend 15 min";
+        }
+      }, 1500);
+    }
+  };
+  extendButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void extendSession();
+  });
+  const refreshSession = async () => {
+    if (ended) return;
+    try {
+      const response = await fetch("/__rms/session-status", { cache: "no-store", credentials: "same-origin" });
+      if (response.status === 403 || response.status === 404) {
+        showEnded();
+        return;
+      }
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!payload.active) {
+        showEnded();
+        return;
+      }
+      const nextExpiry = Date.parse(payload.expires_at);
+      if (Number.isFinite(nextExpiry)) expiresAt = nextExpiry;
+      renderRemaining();
+    } catch (_) {
+      // The local countdown remains authoritative if the tunnel is briefly unreachable.
+    }
+  };
+  renderRemaining();
+  window.setInterval(renderRemaining, 1000);
+  window.setInterval(refreshSession, 5000);
+  void refreshSession();
+})();
+</script>`
+
+func injectLuciSessionChrome(body []byte, session Session, publicURL string) []byte {
+	lower := bytes.ToLower(body)
+	marker := []byte("</body>")
+	idx := bytes.LastIndex(lower, marker)
+	if idx < 0 {
+		return body
+	}
+	deviceName := session.DeviceName
+	if deviceName == "" {
+		deviceName = session.DeviceSerial
+	}
+	deviceJSON, _ := json.Marshal(deviceName)
+	serialJSON, _ := json.Marshal(session.DeviceSerial)
+	homeJSON, _ := json.Marshal(publicURL)
+	chrome := strings.ReplaceAll(luciSessionChromeTemplate, "__XNET_SESSION_EXPIRES_AT__", fmt.Sprintf("%d", session.ExpiresAt.UnixMilli()))
+	chrome = strings.ReplaceAll(chrome, "__XNET_DEVICE_NAME_HTML__", html.EscapeString(deviceName))
+	chrome = strings.ReplaceAll(chrome, "__XNET_DEVICE_SERIAL_HTML__", html.EscapeString(session.DeviceSerial))
+	chrome = strings.ReplaceAll(chrome, "__XNET_DEVICE_NAME_JSON__", string(deviceJSON))
+	chrome = strings.ReplaceAll(chrome, "__XNET_DEVICE_SERIAL_JSON__", string(serialJSON))
+	chrome = strings.ReplaceAll(chrome, "__XNET_RMS_HOME__", string(homeJSON))
+	out := make([]byte, 0, len(body)+len(chrome))
+	out = append(out, body[:idx]...)
+	out = append(out, chrome...)
+	out = append(out, body[idx:]...)
+	return out
+}
+
 func forwardLuciRequestHeaders(src http.Header) http.Header {
 	dst := src.Clone()
 	dst.Del("Connection")
@@ -136,6 +310,16 @@ func forwardLuciRequestHeaders(src http.Header) http.Header {
 	return dst
 }
 
+func luciUpstreamPath(requestURI string) string {
+	if requestURI == "/" {
+		return "/cgi-bin/luci/"
+	}
+	if strings.HasPrefix(requestURI, "/ubus") && (requestURI == "/ubus" || strings.HasPrefix(requestURI, "/ubus/")) {
+		return "/cgi-bin/luci/admin/ubus" + strings.TrimPrefix(requestURI, "/ubus")
+	}
+	return requestURI
+}
+
 func tunnelOriginAllowed(publicURL, host, origin string, allowOpaque bool) bool {
 	if origin == "" || (allowOpaque && origin == "null") {
 		return true
@@ -155,21 +339,21 @@ func tunnelOriginAllowed(publicURL, host, origin string, allowOpaque bool) bool 
 func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pair) {
 	if err := g.ensureLuciSSH(p); err != nil {
 		log.Printf("rms tunnel session %s LuCI SSH setup failed: %v", id, err)
-		fail(w, 502, "router SSH unavailable")
+		g.tunnelPage(w, r, 502, "ROUTER UNAVAILABLE", "Router connection lost", "The router did not accept the secure LuCI connection. Try starting a new session from the device details page.", false)
 		return
 	}
 	p.mu.Lock()
 	transport := p.sshTransport
 	p.mu.Unlock()
 	if transport == nil {
-		fail(w, 502, "LuCI transport unavailable")
+		g.tunnelPage(w, r, 502, "ROUTER UNAVAILABLE", "LuCI transport unavailable", "The secure router transport is no longer available. Start a new remote session and try again.", false)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
-	path := r.URL.RequestURI()
-	if path == "/" {
-		path = "/cgi-bin/luci/"
-	}
+	// LuCI's browser-side RPC client uses /ubus/, while this firmware exposes
+	// the ubus CGI handler below /cgi-bin/luci/admin/ubus. Keep the browser URL
+	// unchanged and translate only the upstream hop.
+	path := luciUpstreamPath(r.URL.RequestURI())
 	out := r.Clone(r.Context())
 	out.URL = &url.URL{Scheme: "http", Host: "127.0.0.1", Path: path}
 	if q := strings.IndexByte(path, '?'); q >= 0 {
@@ -181,7 +365,7 @@ func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pai
 	resp, err := transport.RoundTrip(out)
 	if err != nil {
 		log.Printf("rms tunnel session %s LuCI request failed path=%s: %v", id, r.URL.Path, err)
-		fail(w, 502, "router LuCI unavailable")
+		g.tunnelPage(w, r, 502, "ROUTER UNAVAILABLE", "Router connection lost", "The router stopped responding to the LuCI request. Start a new session and try again.", false)
 		return
 	}
 	defer resp.Body.Close()
@@ -196,6 +380,18 @@ func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pai
 		if err == nil && u.IsAbs() && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost") {
 			w.Header().Set("Location", u.RequestURI())
 		}
+	}
+	if r.Method == http.MethodGet && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") && resp.Header.Get("Content-Encoding") == "" {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		if readErr != nil {
+			log.Printf("rms tunnel session %s LuCI HTML read failed path=%s: %v", id, r.URL.Path, readErr)
+		}
+		body = injectLuciLoadingFallback(body)
+		body = injectLuciSessionChrome(body, p.session, g.Config.PublicURL)
+		w.Header().Del("Content-Length")
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(body)
+		return
 	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, 1024*1024))
@@ -268,6 +464,83 @@ func (g *Gateway) close(id string, p *Pair) {
 	})
 }
 func (g *Gateway) Reconcile() error { return g.call("POST", "/internal/reconcile", nil, nil) }
+
+func terminalPage(data []byte, session Session) []byte {
+	deviceName := session.DeviceName
+	if deviceName == "" {
+		deviceName = session.DeviceSerial
+	}
+	page := string(data)
+	for placeholder, value := range map[string]string{
+		"__XNET_DEVICE_NAME__":         deviceName,
+		"__XNET_DEVICE_SERIAL__":       session.DeviceSerial,
+		"__XNET_DEVICE_MODEL__":        session.DeviceModel,
+		"__XNET_DEVICE_FIRMWARE__":     session.DeviceFirmware,
+		"__XNET_SESSION_EXPIRES_AT__": session.ExpiresAt.Format(time.RFC3339Nano),
+	} {
+		page = strings.ReplaceAll(page, placeholder, html.EscapeString(value))
+	}
+	return []byte(page)
+}
+
+func acceptsHTML(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/html")
+}
+
+func (g *Gateway) tunnelLoadingPage(w http.ResponseWriter, r *http.Request, expiresAt time.Time) {
+	if acceptsHTML(r) {
+		w.Header().Set("Refresh", "2")
+	}
+	g.tunnelPageWithExpiry(w, r, 503, "CONNECTING", "Connecting to router", "The router is still establishing its secure tunnel. This page will refresh automatically when LuCI is ready.", true, expiresAt)
+}
+
+func (g *Gateway) tunnelPage(w http.ResponseWriter, r *http.Request, status int, eyebrow, title, message string, retry bool) {
+	g.tunnelPageWithExpiry(w, r, status, eyebrow, title, message, retry, time.Time{})
+}
+
+func (g *Gateway) tunnelPageWithExpiry(w http.ResponseWriter, r *http.Request, status int, eyebrow, title, message string, retry bool, expiresAt time.Time) {
+	if !acceptsHTML(r) {
+		fail(w, status, message)
+		return
+	}
+	markClass := ""
+	if eyebrow == "CONNECTING" {
+		markClass = " loading"
+	}
+	primary := `<button class="action primary" type="button" onclick="location.reload()">Try again</button>`
+	if !retry {
+		primary = `<button class="action primary" type="button" onclick="window.close();this.textContent='You can close this tab'">Close tab</button>`
+	}
+	expiry := ""
+	if !expiresAt.IsZero() {
+		expiry = fmt.Sprintf(`<style>.session-time{display:inline-flex;align-items:center;gap:5px;margin-right:7px;color:var(--muted);font-size:11px}.session-time strong{color:var(--navy);font-family:ui-monospace,monospace;font-size:12px}</style><span class="session-time" data-expires-at="%d">Time remaining: <strong>--:--</strong></span><script>(function(){var e=document.querySelector('.session-time'),s=e&&e.querySelector('strong'),end=e&&Number(e.dataset.expiresAt);if(!e||!s)return;function tick(){var n=Math.max(0,Math.ceil((end-Date.now())/1000));if(!n){s.textContent='Expired';location.reload();return}s.textContent=Math.floor(n/60)+':'+String(n%%60).padStart(2,'0')}tick();setInterval(tick,1000)})();</script>`, expiresAt.UnixMilli())
+	}
+	if expiry != "" {
+		primary = expiry + primary
+	}
+	returnLink := ""
+	if g.Config.PublicURL != "" {
+		returnLink = fmt.Sprintf(`<a class="action" href="%s">Open XNET RMS</a>`, html.EscapeString(g.Config.PublicURL))
+	}
+	document := fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#203864"><title>%s · XNET RMS</title>
+<style>
+:root{color-scheme:light;--navy:#203864;--azure:#668bce;--bg:#f5f6f9;--ink:#191c23;--muted:#6d7482;--border:#e5e7ec}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 8%% 0%%,rgba(102,139,206,.16),transparent 31rem),var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.app{min-height:100vh}.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:64px;padding:0 28px;color:#fff;background:linear-gradient(135deg,#142747,var(--navy));box-shadow:0 8px 24px rgba(32,56,100,.14)}
+.brand{display:flex;align-items:center;gap:11px}.mark{display:block;width:36px;height:24px;transform-origin:center}.mark.loading{animation:breathe 2s ease-in-out infinite;will-change:transform,filter}@keyframes breathe{0%%,100%%{transform:scale(.92);filter:drop-shadow(0 0 0 rgba(143,181,240,0))}50%%{transform:scale(1.06);filter:drop-shadow(0 0 14px rgba(143,181,240,.48))}}@media(prefers-reduced-motion:reduce){.mark.loading{animation:none}}.name{font-size:14px;font-weight:700}.caption{margin-top:2px;color:rgba(255,255,255,.62);font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.main{display:grid;place-items:center;width:min(760px,calc(100%% - 32px));min-height:calc(100vh - 64px);margin:0 auto;padding:32px 0}.card{width:100%%;overflow:hidden;border:1px solid var(--border);border-radius:14px;background:#fff;box-shadow:0 14px 40px rgba(25,28,35,.08)}.head{display:flex;align-items:flex-start;gap:14px;padding:24px;border-bottom:1px solid var(--border)}.icon{display:grid;flex:0 0 42px;width:42px;height:42px;place-items:center;border-radius:11px;color:#fff;background:var(--navy);font-family:ui-monospace,monospace;font-size:14px;font-weight:700}.eyebrow{margin:1px 0 7px;color:var(--azure);font-size:10px;font-weight:800;letter-spacing:.1em}.head h1{margin:0;font-size:20px;letter-spacing:-.02em}.head p{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.6}.body{padding:24px}.status{display:inline-flex;align-items:center;gap:7px;border:1px solid #f1c5cd;border-radius:99px;padding:5px 9px;color:#bb2d46;background:#fcecef;font-size:10px;font-weight:800;letter-spacing:.06em}.dot{width:7px;height:7px;border-radius:99px;background:#bb2d46}.detail{margin:18px 0 0;padding:13px 14px;border-radius:9px;background:#f5f6f9;color:var(--muted);font-size:12px;line-height:1.6}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}.action{display:inline-flex;align-items:center;justify-content:center;border:1px solid #d8dce5;border-radius:7px;padding:9px 13px;color:var(--navy);background:#fff;font:inherit;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer}.action:hover{background:#f2f4f7}.action.primary{border-color:var(--navy);color:#fff;background:var(--navy)}.action.primary:hover{background:#29477d}.foot{padding:0 24px 22px;color:var(--muted);font-size:10.5px}@media(max-width:640px){.topbar{padding:0 16px}.caption{display:none}.main{width:min(100%% - 20px,760px);padding:18px 0}.head,.body{padding:18px}.foot{padding:0 18px 18px}}
+</style></head>
+<body><div class="app"><header class="topbar"><div class="brand"><svg viewBox="0 0 62 24" role="img" aria-label="XNET" class="mark%s" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" fill="#203864" r="11"></circle><circle cx="24" cy="12" fill="#2e5496" r="11"></circle><circle cx="36" cy="12" fill="#3f6bb0" r="11"></circle><circle cx="48" cy="12" fill="#668bce" r="11"></circle></svg><div><div class="name">XNET RMS</div><div class="caption">Secure remote access</div></div></div><span class="status"><span class="dot"></span>%s</span></header><main class="main"><section class="card"><div class="head"><div class="icon">&gt;_</div><div><div class="eyebrow">REMOTE SESSION</div><h1>%s</h1><p>%s</p></div></div><div class="body"><div class="detail">This page is served by XNET RMS because the router tunnel is not available for the current request. Your dashboard session and router login remain separate.</div><div class="actions">%s%s</div></div><div class="foot">For security, remote sessions expire automatically and cannot be resumed after they close.</div></section></main></div></body></html>`, html.EscapeString(title), markClass, html.EscapeString(eyebrow), html.EscapeString(title), html.EscapeString(message), primary, returnLink)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, document)
+}
+
 func (g *Gateway) Shutdown() {
 	g.mu.Lock()
 	pairs := map[string]*Pair{}
@@ -298,25 +571,25 @@ func (g *Gateway) Handler() http.Handler {
 		}
 		suffix := "." + g.Config.TunnelDomain
 		if !strings.HasSuffix(host, suffix) {
-			fail(w, 404, "session host required")
+			g.tunnelPage(w, r, 404, "INVALID ADDRESS", "Session host required", "Open this link from an active XNET RMS remote session.", false)
 			return
 		}
 		id := strings.TrimSuffix(host, suffix)
 		if !validID(id) {
-			fail(w, 404, "invalid session")
+			g.tunnelPage(w, r, 404, "INVALID SESSION", "Invalid remote session", "The session link is not valid. Start a new session from the XNET RMS device page.", false)
 			return
 		}
 		var session Session
 		if err := g.call("GET", "/internal/sessions/"+id, nil, &session); err != nil {
 			log.Printf("rms tunnel session %s inactive: %v path=%s", id, err, r.URL.Path)
-			fail(w, 403, "session inactive")
+			g.tunnelPage(w, r, 403, "SESSION ENDED", "Remote session unavailable", "This remote session has ended or expired. Start a new session from the XNET RMS device details page.", false)
 			return
 		}
 		log.Printf("rms tunnel session %s request path=%s protocol=%s", id, r.URL.Path, session.Protocol)
 		if r.URL.Path == "/launch" {
 			cookie := secret()
 			if g.call("POST", "/internal/sessions/"+id+"/claim", map[string]string{"ticket": r.URL.Query().Get("ticket"), "cookie": cookie}, nil) != nil {
-				fail(w, 403, "launch ticket invalid or used")
+				g.tunnelPage(w, r, 403, "LINK EXPIRED", "Launch link unavailable", "This one-time launch link has already been used or has expired. Start a new remote session.", false)
 				return
 			}
 			http.SetCookie(w, &http.Cookie{Name: "__Host-rms_session", Value: cookie, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: int(time.Until(session.ExpiresAt).Seconds())})
@@ -330,18 +603,36 @@ func (g *Gateway) Handler() http.Handler {
 				r.AddCookie(&http.Cookie{Name: "__Host-rms_session", Value: cookie})
 			}
 		}
-	cookie, e := r.Cookie("__Host-rms_session")
-	if e != nil || session.BrowserHash == "" || subtle.ConstantTimeCompare([]byte(digest(cookie.Value)), []byte(session.BrowserHash)) != 1 {
-		fail(w, 403, "session login required")
-		return
-	}
-	// Refresh the browser cookie lifetime on every authorized request. This is
-	// required when the dashboard extends an active session while LuCI remains
-	// open; otherwise the browser would keep the original launch expiry.
-	if maxAge := int(time.Until(session.ExpiresAt).Seconds()); maxAge > 0 {
-		http.SetCookie(w, &http.Cookie{Name: "__Host-rms_session", Value: cookie.Value, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
-	}
-	if origin := r.Header.Get("Origin"); origin != "" {
+		cookie, e := r.Cookie("__Host-rms_session")
+		if e != nil || session.BrowserHash == "" || subtle.ConstantTimeCompare([]byte(digest(cookie.Value)), []byte(session.BrowserHash)) != 1 {
+			g.tunnelPage(w, r, 403, "AUTHORIZATION REQUIRED", "Remote session not claimed", "Open the original launch link to authorize this browser session before loading the router interface.", false)
+			return
+		}
+		// Keep the browser cookie aligned with the extended session expiry while
+		// LuCI remains open in another tab.
+		if maxAge := int(time.Until(session.ExpiresAt).Seconds()); maxAge > 0 {
+			http.SetCookie(w, &http.Cookie{Name: "__Host-rms_session", Value: cookie.Value, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
+		}
+		if r.URL.Path == "/__rms/session-status" {
+			output(w, http.StatusOK, map[string]any{"active": true, "expires_at": session.ExpiresAt})
+			return
+		}
+		if r.URL.Path == "/__rms/session-extend" {
+			if r.Method != http.MethodPost {
+				fail(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			var result struct {
+				ExpiresAt time.Time `json:"expires_at"`
+			}
+			if g.call("POST", "/internal/sessions/"+id+"/extend", nil, &result) != nil {
+				fail(w, http.StatusConflict, "session extension unavailable")
+				return
+			}
+			output(w, http.StatusOK, result)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
 			expected := "https://" + r.Host
 			if !tunnelOriginAllowed(g.Config.PublicURL, r.Host, origin, session.Protocol == "SSH_LUCI") {
 				log.Printf("rms tunnel origin rejected host=%q origin=%q expected=%q path=%s", r.Host, origin, expected, r.URL.Path)
@@ -352,7 +643,12 @@ func (g *Gateway) Handler() http.Handler {
 		g.mu.Lock()
 		p := g.pairs[id]
 		g.mu.Unlock()
-	if r.URL.Path == "/close" {
+		if p == nil && session.Protocol == "SSH_LUCI" && r.URL.Path == "/" && acceptsHTML(r) {
+			w.Header().Set("Retry-After", "2")
+			g.tunnelLoadingPage(w, r, session.ExpiresAt)
+			return
+		}
+		if r.URL.Path == "/close" {
 			if r.Method != http.MethodPost {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				return
@@ -363,25 +659,25 @@ func (g *Gateway) Handler() http.Handler {
 				_ = g.call("POST", "/internal/sessions/"+id+"/close", nil, nil)
 			}
 			w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if p == nil && (session.Protocol == "HTTP_LUCI" || session.Protocol == "SSH_LUCI") {
-		// The browser follows /launch immediately. Give the router's
-		// outbound WebSocket a short, bounded window to attach before serving
-		// the first LuCI document. This avoids requiring a manual refresh when
-		// MQTT command delivery and tunnel attachment finish a moment later.
-		deadline := time.Now().Add(10 * time.Second)
-		for p == nil && time.Now().Before(deadline) {
-			time.Sleep(100 * time.Millisecond)
-			g.mu.Lock()
-			p = g.pairs[id]
-			g.mu.Unlock()
+			return
 		}
-	}
-	if session.Protocol == "SSH_LUCI" {
+		if p == nil && (session.Protocol == "HTTP_LUCI" || session.Protocol == "SSH_LUCI") {
+			// The browser follows /launch immediately. Give the router's
+			// outbound WebSocket a short, bounded window to attach before serving
+			// the first LuCI document. This avoids requiring a manual refresh when
+			// MQTT command delivery and tunnel attachment finish a moment later.
+			deadline := time.Now().Add(10 * time.Second)
+			for p == nil && time.Now().Before(deadline) {
+				time.Sleep(100 * time.Millisecond)
+				g.mu.Lock()
+				p = g.pairs[id]
+				g.mu.Unlock()
+			}
+		}
+		if session.Protocol == "SSH_LUCI" {
 			if p == nil {
 				w.Header().Set("Retry-After", "2")
-				fail(w, 503, "router connecting; retry shortly")
+				g.tunnelLoadingPage(w, r, session.ExpiresAt)
 				return
 			}
 			g.luci(w, r, id, p)
@@ -416,13 +712,13 @@ func (g *Gateway) Handler() http.Handler {
 				return
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write(data)
+			w.Write(terminalPage(data, session))
 			return
 		}
 		if p == nil {
 			log.Printf("rms tunnel session %s has no router pair path=%s", id, r.URL.Path)
 			w.Header().Set("Retry-After", "2")
-			fail(w, 503, "router connecting; retry shortly")
+			g.tunnelLoadingPage(w, r, session.ExpiresAt)
 			return
 		}
 		g.proxy(w, r, id, p)
@@ -855,7 +1151,7 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 	if e != nil {
 		log.Printf("rms tunnel session %s router write failed: %v", id, e)
 		g.close(id, p)
-		fail(w, 502, "router unavailable")
+		g.tunnelPage(w, r, 502, "ROUTER UNAVAILABLE", "Router connection lost", "The secure tunnel closed before the router could receive this LuCI request.", false)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -879,15 +1175,15 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 			}
 			p.httpLock.Unlock()
 		}(r.URL.Path)
-		fail(w, 504, "router timeout")
+		g.tunnelPage(w, r, 504, "ROUTER TIMEOUT", "Router request timed out", "The router did not respond in time. The tunnel is still available; try the request again.", true)
 	case <-p.done:
-		fail(w, 502, "session closed")
+		g.tunnelPage(w, r, 502, "SESSION ENDED", "Remote session ended", "The secure tunnel closed while LuCI was loading. Start a new session from the XNET RMS device details page.", false)
 	case data := <-p.responses:
 		var res HTTPFrame
 		if json.Unmarshal(data, &res) != nil || res.Status < 200 || res.Status > 599 {
 			log.Printf("rms tunnel session %s invalid router response path=%s", id, r.URL.Path)
 			g.close(id, p)
-			fail(w, 502, "invalid router response")
+			g.tunnelPage(w, r, 502, "INVALID RESPONSE", "Router response unavailable", "The router returned an invalid response for this LuCI request. Start a new session if the problem continues.", false)
 			return
 		}
 		for k, v := range res.Headers {

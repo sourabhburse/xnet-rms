@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +32,22 @@ func TestCacheableLuCIAsset(t *testing.T) {
 	post := &http.Request{Method: http.MethodPost, URL: &url.URL{Path: "/luci-static/resources/luci.js"}}
 	if cacheableLuCIAsset(post, http.StatusOK) {
 		t.Fatal("cached a non-GET request")
+	}
+}
+
+func TestLuciUpstreamPathMapsUbusEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		request, want string
+	}{
+		{"/", "/cgi-bin/luci/"},
+		{"/ubus/?session=1", "/cgi-bin/luci/admin/ubus/?session=1"},
+		{"/ubus", "/cgi-bin/luci/admin/ubus"},
+		{"/luci-static/resources/ui.js?v=1", "/luci-static/resources/ui.js?v=1"},
+	} {
+		path := luciUpstreamPath(tc.request)
+		if path != tc.want {
+			t.Errorf("upstream path for %q = %q, want %q", tc.request, path, tc.want)
+		}
 	}
 }
 
@@ -84,6 +102,115 @@ func TestTunnelOriginAllowsAuthenticatedDashboardOrigin(t *testing.T) {
 	}
 	if tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "null", false) {
 		t.Fatal("opaque terminal origin should remain rejected")
+	}
+}
+
+func TestTunnelPageRendersHTMLForDocumentRequests(t *testing.T) {
+	g := &Gateway{Config: Config{PublicURL: "https://rms.example"}}
+	r := httptest.NewRequest(http.MethodGet, "https://session.rms.example/", nil)
+	r.Header.Set("Accept", "text/html,application/xhtml+xml")
+	w := httptest.NewRecorder()
+
+	g.tunnelPage(w, r, http.StatusBadGateway, "SESSION ENDED", "Remote session ended", "The secure tunnel closed while LuCI was loading.", false)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadGateway)
+	}
+	if got := w.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Fatalf("content type = %q", got)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"XNET RMS", "Remote session ended", "The secure tunnel closed", "Open XNET RMS", "Close tab"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("HTML page does not contain %q", want)
+		}
+	}
+}
+
+func TestTunnelPageKeepsJSONForNonDocumentRequests(t *testing.T) {
+	g := &Gateway{}
+	r := httptest.NewRequest(http.MethodGet, "https://session.rms.example/ubus", nil)
+	r.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+
+	g.tunnelPage(w, r, http.StatusBadGateway, "SESSION ENDED", "Remote session ended", "The secure tunnel closed.", false)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadGateway)
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content type = %q, want application/json", got)
+	}
+	if strings.Contains(w.Body.String(), "<html") {
+		t.Fatal("non-document request received an HTML page")
+	}
+}
+
+func TestTunnelLoadingPageUsesBreathingFourCircleLogo(t *testing.T) {
+	g := &Gateway{}
+	r := httptest.NewRequest(http.MethodGet, "https://session.rms.example/", nil)
+	r.Header.Set("Accept", "text/html,application/xhtml+xml")
+	w := httptest.NewRecorder()
+
+	g.tunnelLoadingPage(w, r, time.Now().Add(time.Minute))
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+	body := w.Body.String()
+	for _, want := range []string{`class="mark loading"`, `viewBox="0 0 62 24"`, `fill="#203864"`, "Time remaining", "@keyframes breathe", "prefers-reduced-motion:reduce"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("loading page does not contain %q", want)
+		}
+	}
+	if got := strings.Count(body, "<circle "); got != 4 {
+		t.Fatalf("logo circle count = %d, want 4", got)
+	}
+}
+
+func TestInjectLuciLoadingFallback(t *testing.T) {
+	body := []byte(`<html><head><title>LuCI</title></head><body><div class="main"><div class="loading">Collecting data...</div></div></body></html>`)
+	got := string(injectLuciLoadingFallback(body))
+	if !strings.Contains(got, `id="xnet-rms-loading-fallback"`) {
+		t.Fatal("LuCI loading fallback was not injected")
+	}
+	if strings.Index(got, `id="xnet-rms-loading-fallback"`) > strings.Index(got, "</head>") {
+		t.Fatal("LuCI loading fallback was injected after </head>")
+	}
+	if unchanged := string(injectLuciLoadingFallback([]byte("<html><body>no head</body></html>"))); unchanged != "<html><body>no head</body></html>" {
+		t.Fatalf("document without head was changed: %s", unchanged)
+	}
+}
+
+func TestInjectLuciSessionChrome(t *testing.T) {
+	body := []byte(`<html><head></head><body><div class="main">LuCI</div></body></html>`)
+	session := Session{DeviceName: "Lab Gateway", DeviceSerial: "FG090422657", ExpiresAt: time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)}
+	got := string(injectLuciSessionChrome(body, session, "https://rms.example:8445"))
+	for _, want := range []string{`id="xnet-rms-session-indicator"`, `aria-label="Session time remaining"`, `Extend 15 min`, `event.preventDefault()`, `min-width:122px`, `min-height:38px`, `__rms/session-status`, `__rms/session-extend`, `Remote session ended`, `Lab Gateway`, `FG090422657`, `viewBox="0 0 62 24"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("session chrome does not contain %q", want)
+		}
+	}
+	if strings.Contains(got, `xnet-rms-session-toggle`) || strings.Contains(got, `data-expanded=`) {
+		t.Fatal("session chrome should reveal extension controls on hover without a toggle click")
+	}
+	if strings.Contains(got, "__XNET_") {
+		t.Fatalf("unresolved session chrome placeholder: %s", got)
+	}
+}
+
+func TestTerminalPageInjectsEscapedDeviceDetails(t *testing.T) {
+	page := terminalPage([]byte(`<strong id="device-name">__XNET_DEVICE_NAME__</strong><span>__XNET_DEVICE_SERIAL__</span><span>__XNET_SESSION_EXPIRES_AT__</span>`), Session{
+		DeviceName:   "Lab <Gateway>",
+		DeviceSerial: "FG090422657",
+		ExpiresAt:    time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC),
+	})
+	got := string(page)
+	if !strings.Contains(got, "Lab &lt;Gateway&gt;") || !strings.Contains(got, "FG090422657") {
+		t.Fatalf("device details were not safely injected: %s", got)
+	}
+	if !strings.Contains(got, "2026-09-11T12:00:00Z") || strings.Contains(got, "__XNET_") {
+		t.Fatalf("unresolved device placeholder: %s", got)
 	}
 }
 
