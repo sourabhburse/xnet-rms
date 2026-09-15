@@ -9,6 +9,10 @@ and `deployment/v2`. The former Docker-era `deploy/` tree and the old demo UI
 are removed; use `PROJECT_HANDOFF.md` and `deployment/v2/README.md` for the
 current operational paths.
 
+For the repeatable workflow to build, deploy, verify, and roll back a live
+hosted change, see [docs/LIVE_DEPLOYMENT.md](docs/LIVE_DEPLOYMENT.md). Project
+rules for agents and contributors are in [AGENTS.md](AGENTS.md).
+
 ---
 
 ## Repository Structure
@@ -71,6 +75,8 @@ roadmap work and are not represented by placeholder screens in the active UI.
 3. **RMS Connect (NAT / CGNAT Traversal)**:
    - On-demand outbound reverse TLS tunnels over Port 443.
    - **LuCI WebUI Viewer**: Embedded LuCI browser proxy to `127.0.0.1:80`.
+     The tunnel does not create or inject a LuCI session; the operator signs in
+     with the router's own LuCI credentials.
    - **Web Terminal**: Interactive browser shell (`/bin/ash`) via `xterm.js`.
    - **SFTP File Explorer**: Browse, upload, download, and edit router files.
    - **LAN Device Access**: Reach equipment behind the router (IP cameras, PLCs).

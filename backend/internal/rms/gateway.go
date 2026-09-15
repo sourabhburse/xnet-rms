@@ -36,12 +36,9 @@ type Pair struct {
 	done                chan struct{}
 	once                sync.Once
 	sshOnce             sync.Once
-	luciReadyOnce       sync.Once
 	sshClient           *ssh.Client
 	sshTransport        *http.Transport
 	sshErr              error
-	luciCookie          string
-	luciReady           chan struct{}
 	initial             []byte
 	routerIn            *io.PipeReader
 	routerOut           *io.PipeWriter
@@ -118,26 +115,54 @@ func copyLuciResponseHeaders(dst, src http.Header) {
 	}
 }
 
+func forwardLuciRequestHeaders(src http.Header) http.Header {
+	dst := src.Clone()
+	dst.Del("Connection")
+	if cookie := dst.Get("Cookie"); cookie != "" {
+		kept := make([]string, 0, 2)
+		for _, part := range strings.Split(cookie, ";") {
+			part = strings.TrimSpace(part)
+			if part == "" || strings.HasPrefix(part, "__Host-rms_session=") {
+				continue
+			}
+			kept = append(kept, part)
+		}
+		if len(kept) == 0 {
+			dst.Del("Cookie")
+		} else {
+			dst.Set("Cookie", strings.Join(kept, "; "))
+		}
+	}
+	return dst
+}
+
+func tunnelOriginAllowed(publicURL, host, origin string, allowOpaque bool) bool {
+	if origin == "" || (allowOpaque && origin == "null") {
+		return true
+	}
+	if sameOrigin("https://"+host, origin) {
+		return true
+	}
+	// LuCI can be embedded or submitted from the authenticated dashboard
+	// while the tunnel itself lives on the per-session hostname. The session
+	// cookie is host-only, so this does not grant access without the tunnel's
+	// own browser session authorization above.
+	return publicURL != "" && sameOrigin(publicURL, origin)
+}
+
+// The RMS session authorizes the tunnel only. LuCI authenticates the browser
+// with the router's own login page and sysauth cookie.
 func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pair) {
 	if err := g.ensureLuciSSH(p); err != nil {
 		log.Printf("rms tunnel session %s LuCI SSH setup failed: %v", id, err)
 		fail(w, 502, "router SSH unavailable")
 		return
 	}
-	select {
-	case <-p.luciReady:
-	case <-p.done:
-		fail(w, 502, "session closed")
-		return
-	case <-time.After(5 * time.Second):
-		fail(w, 502, "LuCI authorization unavailable")
-		return
-	}
 	p.mu.Lock()
-	cookie, transport := p.luciCookie, p.sshTransport
+	transport := p.sshTransport
 	p.mu.Unlock()
-	if cookie == "" || transport == nil {
-		fail(w, 502, "LuCI authorization unavailable")
+	if transport == nil {
+		fail(w, 502, "LuCI transport unavailable")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
@@ -152,9 +177,7 @@ func (g *Gateway) luci(w http.ResponseWriter, r *http.Request, id string, p *Pai
 	}
 	out.RequestURI = ""
 	out.Host = "127.0.0.1"
-	out.Header = r.Header.Clone()
-	out.Header.Set("Cookie", "sysauth="+cookie+"; sysauth_http="+cookie)
-	out.Header.Del("Connection")
+	out.Header = forwardLuciRequestHeaders(r.Header)
 	resp, err := transport.RoundTrip(out)
 	if err != nil {
 		log.Printf("rms tunnel session %s LuCI request failed path=%s: %v", id, r.URL.Path, err)
@@ -307,19 +330,29 @@ func (g *Gateway) Handler() http.Handler {
 				r.AddCookie(&http.Cookie{Name: "__Host-rms_session", Value: cookie})
 			}
 		}
-		cookie, e := r.Cookie("__Host-rms_session")
-		if e != nil || session.BrowserHash == "" || subtle.ConstantTimeCompare([]byte(digest(cookie.Value)), []byte(session.BrowserHash)) != 1 {
-			fail(w, 403, "session login required")
-			return
-		}
-		if r.Header.Get("Origin") != "" && r.Header.Get("Origin") != "https://"+r.Host {
-			fail(w, 403, "origin rejected")
-			return
+	cookie, e := r.Cookie("__Host-rms_session")
+	if e != nil || session.BrowserHash == "" || subtle.ConstantTimeCompare([]byte(digest(cookie.Value)), []byte(session.BrowserHash)) != 1 {
+		fail(w, 403, "session login required")
+		return
+	}
+	// Refresh the browser cookie lifetime on every authorized request. This is
+	// required when the dashboard extends an active session while LuCI remains
+	// open; otherwise the browser would keep the original launch expiry.
+	if maxAge := int(time.Until(session.ExpiresAt).Seconds()); maxAge > 0 {
+		http.SetCookie(w, &http.Cookie{Name: "__Host-rms_session", Value: cookie.Value, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+			expected := "https://" + r.Host
+			if !tunnelOriginAllowed(g.Config.PublicURL, r.Host, origin, session.Protocol == "SSH_LUCI") {
+				log.Printf("rms tunnel origin rejected host=%q origin=%q expected=%q path=%s", r.Host, origin, expected, r.URL.Path)
+				fail(w, 403, "origin rejected")
+				return
+			}
 		}
 		g.mu.Lock()
 		p := g.pairs[id]
 		g.mu.Unlock()
-		if r.URL.Path == "/close" {
+	if r.URL.Path == "/close" {
 			if r.Method != http.MethodPost {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				return
@@ -330,9 +363,22 @@ func (g *Gateway) Handler() http.Handler {
 				_ = g.call("POST", "/internal/sessions/"+id+"/close", nil, nil)
 			}
 			w.WriteHeader(http.StatusNoContent)
-			return
+		return
+	}
+	if p == nil && (session.Protocol == "HTTP_LUCI" || session.Protocol == "SSH_LUCI") {
+		// The browser follows /launch immediately. Give the router's
+		// outbound WebSocket a short, bounded window to attach before serving
+		// the first LuCI document. This avoids requiring a manual refresh when
+		// MQTT command delivery and tunnel attachment finish a moment later.
+		deadline := time.Now().Add(10 * time.Second)
+		for p == nil && time.Now().Before(deadline) {
+			time.Sleep(100 * time.Millisecond)
+			g.mu.Lock()
+			p = g.pairs[id]
+			g.mu.Unlock()
 		}
-		if session.Protocol == "SSH_LUCI" {
+	}
+	if session.Protocol == "SSH_LUCI" {
 			if p == nil {
 				w.Header().Set("Retry-After", "2")
 				fail(w, 503, "router connecting; retry shortly")
@@ -373,19 +419,6 @@ func (g *Gateway) Handler() http.Handler {
 			w.Write(data)
 			return
 		}
-		if p == nil && (session.Protocol == "HTTP_LUCI" || session.Protocol == "SSH_LUCI") {
-			// The browser follows /launch immediately. Give the router's
-			// outbound WebSocket a short, bounded window to attach so LuCI
-			// does not fail its first document request during normal MQTT
-			// and TLS startup latency.
-			deadline := time.Now().Add(10 * time.Second)
-			for p == nil && time.Now().Before(deadline) {
-				time.Sleep(100 * time.Millisecond)
-				g.mu.Lock()
-				p = g.pairs[id]
-				g.mu.Unlock()
-			}
-		}
 		if p == nil {
 			log.Printf("rms tunnel session %s has no router pair path=%s", id, r.URL.Path)
 			w.Header().Set("Retry-After", "2")
@@ -418,7 +451,7 @@ func (g *Gateway) router(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(2 * 1024 * 1024)
-	p := &Pair{session: session, router: conn, responses: make(chan []byte, 1), done: make(chan struct{}), luciReady: make(chan struct{})}
+	p := &Pair{session: session, router: conn, responses: make(chan []byte, 1), done: make(chan struct{})}
 	g.pairs[id] = p
 	go g.readRouter(id, p)
 	go func() {
@@ -505,16 +538,13 @@ func (g *Gateway) readRouter(id string, p *Pair) {
 				return
 			}
 		} else {
+			// Older agents sent a text control frame containing a generated
+			// LuCI cookie. Ignore that legacy frame instead of treating it as
+			// SSH data; browser requests now carry the router's own login cookie.
 			if p.session.Protocol == "SSH_LUCI" && kind == websocket.TextMessage {
-				var control struct {
-					Type   string `json:"type"`
-					Cookie string `json:"cookie"`
-				}
-				if json.Unmarshal(b, &control) == nil && control.Type == "luci_session" && validID(control.Cookie) {
-					p.mu.Lock()
-					p.luciCookie = control.Cookie
-					p.mu.Unlock()
-					p.luciReadyOnce.Do(func() { close(p.luciReady) })
+				var control struct{ Type string `json:"type"` }
+				if json.Unmarshal(b, &control) == nil && control.Type == "luci_session" {
+					continue
 				}
 				continue
 			}
@@ -766,7 +796,7 @@ func (g *Gateway) raw(w http.ResponseWriter, r *http.Request, id string, p *Pair
 }
 func safeHeader(k string) bool {
 	switch strings.ToLower(k) {
-	case "content-type", "accept", "accept-language", "user-agent", "referer", "origin", "x-requested-with", "x-csrf-token", "location", "set-cookie", "cache-control", "content-disposition":
+	case "content-type", "accept", "accept-language", "user-agent", "referer", "origin", "x-requested-with", "x-csrf-token", "cookie", "location", "set-cookie", "cache-control", "content-disposition":
 		return true
 	}
 	return false
@@ -804,7 +834,7 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, id string, p *Pa
 		return
 	}
 	headers := map[string]string{}
-	for k, v := range r.Header {
+	for k, v := range forwardLuciRequestHeaders(r.Header) {
 		if safeHeader(k) && strings.ToLower(k) != "location" {
 			headers[k] = strings.Join(v, ", ")
 		}

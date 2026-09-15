@@ -231,6 +231,10 @@ func (s *Core) bootstrapCheckin(w http.ResponseWriter, r *http.Request) {
 	output(w, 200, map[string]string{"registration_state": state, "code": state})
 }
 func (s *Core) finishBootstrap(w http.ResponseWriter, tx *sql.Tx, id, org string, csr *x509.CertificateRequest) {
+	if e := assignDefaultTelemetry(tx, id); e != nil {
+		onboardingError(w, 503, "temporarily_unavailable")
+		return
+	}
 	cert, e := s.CA.Issue(id, csr.PublicKey, time.Now())
 	var name string
 	if e == nil {
@@ -258,6 +262,12 @@ func activatePending(tx *sql.Tx, pending, org, name string, tags []byte, user st
 	}
 	if e == nil {
 		_, e = tx.Exec("INSERT INTO device_group_members(group_id,device_id) SELECT tg.group_id,$2 FROM enrollment_token_groups tg JOIN pending_devices p ON p.token_id=tg.token_id WHERE p.id=$1 ON CONFLICT DO NOTHING", pending, id)
+	}
+	if e == nil {
+		e = assignDefaultTelemetry(tx, id)
+	}
+	if e == nil {
+		e = reconcileDeviceTx(tx, id, org)
 	}
 	if e == nil {
 		e = audit(tx, org, user, "device.claim", id)
@@ -320,9 +330,12 @@ func normalizeRegistration(v *registrationInput) error {
 }
 func (s *Core) pendingDevices(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	org, ok := scopedOrganization(r, a)
-	if !ok { fail(w, 400, "invalid organization"); return }
-	s.rows(w, `SELECT row_to_json(t) FROM (SELECT p.id,p.organization_id,p.serial_number,p.lan_mac,p.model,p.last_seen FROM pending_devices p JOIN enrollment_tokens e ON e.id=p.token_id WHERE NOT p.canceled AND p.device_id IS NULL AND NOT e.revoked AND (e.expires_at IS NULL OR e.expires_at>now()) AND ($1='' OR p.organization_id=$1) ORDER BY p.last_seen DESC LIMIT 500) t`, org)
+	org, ok := scopedOrganization(r, &a)
+	if !ok {
+		fail(w, 400, "invalid organization")
+		return
+	}
+	s.rows(w, `SELECT row_to_json(t) FROM (SELECT p.id,p.organization_id,p.serial_number,p.lan_mac,p.model,p.last_seen FROM pending_devices p JOIN enrollment_tokens e ON e.id=p.token_id WHERE NOT p.canceled AND p.device_id IS NULL AND NOT e.revoked AND (e.expires_at IS NULL OR e.expires_at>now()) AND ($1 OR p.organization_id=$2) ORDER BY p.last_seen DESC LIMIT 500) t`, a.AllOrgs, org)
 }
 func (s *Core) claimPending(w http.ResponseWriter, r *http.Request) {
 	var v struct {
@@ -364,9 +377,12 @@ func (s *Core) claimPending(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) registrations(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	org, ok := scopedOrganization(r, a)
-	if !ok { fail(w, 400, "invalid organization"); return }
-	s.rows(w, `SELECT row_to_json(t) FROM (SELECT *,CASE WHEN device_id IS NOT NULL THEN 'claimed' WHEN canceled THEN 'canceled' ELSE 'awaiting_device' END AS status FROM registrations WHERE $1='' OR organization_id=$1 ORDER BY created_at DESC LIMIT 500) t`, org)
+	org, ok := scopedOrganization(r, &a)
+	if !ok {
+		fail(w, 400, "invalid organization")
+		return
+	}
+	s.rows(w, `SELECT row_to_json(t) FROM (SELECT *,CASE WHEN device_id IS NOT NULL THEN 'claimed' WHEN canceled THEN 'canceled' ELSE 'awaiting_device' END AS status FROM registrations WHERE $1 OR organization_id=$2 ORDER BY created_at DESC LIMIT 500) t`, a.AllOrgs, org)
 }
 func registrationConflict(tx *sql.Tx, org string, v registrationInput) error {
 	var conflict bool
@@ -564,9 +580,12 @@ func (s *Core) previewCSV(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) tags(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	org, ok := scopedOrganization(r, a)
-	if !ok { fail(w, 400, "invalid organization"); return }
-	s.rows(w, "SELECT row_to_json(t) FROM (SELECT * FROM tags WHERE $1='' OR organization_id=$1 ORDER BY name) t", org)
+	org, ok := scopedOrganization(r, &a)
+	if !ok {
+		fail(w, 400, "invalid organization")
+		return
+	}
+	s.rows(w, "SELECT row_to_json(t) FROM (SELECT * FROM tags WHERE $1 OR organization_id=$2 ORDER BY name) t", a.AllOrgs, org)
 }
 func (s *Core) createTag(w http.ResponseWriter, r *http.Request) {
 	var req struct {

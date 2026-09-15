@@ -38,25 +38,39 @@
   --chart-4: #a7bcde;
   --chart-5: #668bce;
 
-  --sidebar: #ffffff;
-  --sidebar-foreground: #545b68;
-  --sidebar-primary: #2e5496;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e9eff8;
-  --sidebar-accent-foreground: #2e5496;
-  --sidebar-border: #e5e7ec;
-  --sidebar-ring: #2e5496;
+  --sidebar: #182a4a;
+  --sidebar-foreground: #c6d2e6;
+  --sidebar-muted: #8ba3c9;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #182a4a;
+  --sidebar-accent: rgba(255, 255, 255, 0.1);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #8ba3c9;
+
+  --row-divider: #eef0f3;
+  --row-down-bg: #fdfafb;
+  --kpi-down-bg: #fdf7f8;
+  --kpi-warn-bg: #fffaf2;
+  --session-ok-bg: #f2f8f4;
+
+  --chart-muted: #c3ccd8;
+  --chart-muted-2: #e4e8ee;
+  --chart-emphasis: #203864;
 
   /* semantic status */
   --ok: #1a7f47;
   --ok-bg: #e9f6ee;
   --ok-border: #b6e0c5;
+  --ok-rail: #1a7f47;
   --down: #bb2d46;
   --down-bg: #fcecef;
   --down-border: #f1c5cd;
+  --down-rail: #bb2d46;
   --warn: #a9600c;
   --warn-bg: #fbf0e2;
   --warn-border: #eed3b1;
+  --warn-rail: #a9600c;
   --neutral: #5b6472;
   --neutral-bg: #eef0f3;
   --neutral-border: #dadde3;
@@ -66,52 +80,65 @@
 }
 
 .dark {
-  --background: #0d0f13;
+  --background: #0e1420;
   --foreground: #edeef1;
-  --card: #15171d;
+  --card: #131a28;
   --card-foreground: #edeef1;
-  --popover: #1a1d24;
+  --popover: #182235;
   --popover-foreground: #edeef1;
 
   --primary: #7ca4e0;
   --primary-foreground: #0c1220;
-  --secondary: #20242c;
+  --secondary: #1b2333;
   --secondary-foreground: #edeef1;
-  --muted: #20242c;
+  --muted: #1b2333;
   --muted-foreground: #99a1ad;
   --accent: #1f2b44;
   --accent-foreground: #cdddf6;
   --destructive: #d15563;
   --destructive-foreground: #0c1220;
 
-  --border: #282c34;
-  --input: #2c313a;
+  --border: #212b3d;
+  --input: #2b374d;
   --ring: #7ca4e0;
 
-  --chart-1: #4a6fb0;
-  --chart-2: #6c8fce;
-  --chart-3: #90abdd;
-  --chart-4: #2f4468;
-  --chart-5: #7ca4e0;
+  --chart-1: #5f86c7;
+  --chart-2: #84a8df;
+  --chart-3: #b9d0f3;
+  --chart-4: #405578;
+  --chart-5: #9ab9eb;
+  --chart-muted: #71809a;
+  --chart-muted-2: #3b465a;
+  --chart-emphasis: #d3e2fa;
 
-  --sidebar: #131519;
-  --sidebar-foreground: #a2a9b4;
-  --sidebar-primary: #7ca4e0;
-  --sidebar-primary-foreground: #0c1220;
-  --sidebar-accent: #1f2b44;
-  --sidebar-accent-foreground: #cdddf6;
-  --sidebar-border: #282c34;
-  --sidebar-ring: #7ca4e0;
+  --sidebar: #0f1623;
+  --sidebar-foreground: #c6d2e6;
+  --sidebar-muted: #8ba3c9;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #182a4a;
+  --sidebar-accent: rgba(255, 255, 255, 0.1);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #8ba3c9;
 
-  --ok: #6bd299;
+  --row-divider: #212b3d;
+  --row-down-bg: #2a181d;
+  --kpi-down-bg: #2a181d;
+  --session-ok-bg: #152a20;
+
+  --ok: #5fbe86;
   --ok-bg: #12281c;
   --ok-border: #24492f;
-  --down: #f0909d;
+  --ok-rail: #345f47;
+  --down: #e07a8e;
   --down-bg: #2e1519;
   --down-border: #55272e;
-  --warn: #e0b070;
+  --down-rail: #6f3b49;
+  --warn: #e0a955;
   --warn-bg: #2c2011;
   --warn-border: #513c1d;
+  --warn-rail: #6d5128;
+  --kpi-warn-bg: #2c2011;
   --neutral: #9aa2af;
   --neutral-bg: #21252d;
   --neutral-border: #333842;
@@ -162,23 +189,63 @@
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-row-divider: var(--row-divider);
+  --color-row-down-bg: var(--row-down-bg);
+  --color-kpi-down-bg: var(--kpi-down-bg);
+  --color-kpi-warn-bg: var(--kpi-warn-bg);
+  --color-session-ok-bg: var(--session-ok-bg);
+
+  --color-chart-muted: var(--chart-muted);
+  --color-chart-muted-2: var(--chart-muted-2);
+  --color-chart-emphasis: var(--chart-emphasis);
 
   --color-ok: var(--ok);
   --color-ok-bg: var(--ok-bg);
   --color-ok-border: var(--ok-border);
+  --color-ok-rail: var(--ok-rail);
   --color-down: var(--down);
   --color-down-bg: var(--down-bg);
   --color-down-border: var(--down-border);
+  --color-down-rail: var(--down-rail);
   --color-warn: var(--warn);
   --color-warn-bg: var(--warn-bg);
   --color-warn-border: var(--warn-border);
+  --color-warn-rail: var(--warn-rail);
   --color-neutral2: var(--neutral);
   --color-neutral2-bg: var(--neutral-bg);
   --color-neutral2-border: var(--neutral-border);
   --color-brand-navy: var(--brand-navy);
   --color-brand-azure: var(--brand-azure);
+}
+
+/* The supplied loading SVG carries the loading-specific geometry and timing
+   offsets. Keep a small fallback motion on the image itself for browsers that
+   do not apply styles embedded in an SVG loaded through <img>. */
+@keyframes rms-logo-pulse {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: scale(0.98);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+.rms-loading-logo {
+  animation: rms-logo-pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rms-loading-logo {
+    animation: none;
+  }
 }
 
 @layer base {
@@ -195,5 +262,5 @@
 
 /* App shell owns the full viewport; Ant screens render inside the workspace slot. */
 .rms-app-root {
-  min-height: 100vh;
+  min-height: 100dvh;
 }

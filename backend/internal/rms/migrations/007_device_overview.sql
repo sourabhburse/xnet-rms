@@ -1,0 +1,2 @@
+-- Intentionally data-free. The default device overview profile is created by
+-- the first enrollment transaction, not by installation-time migration.

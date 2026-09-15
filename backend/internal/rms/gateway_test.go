@@ -33,6 +33,60 @@ func TestCacheableLuCIAsset(t *testing.T) {
 	}
 }
 
+func TestForwardLuciRequestHeadersPreservesRouterLoginCookie(t *testing.T) {
+	in := http.Header{
+		"Cookie":     []string{"__Host-rms_session=rms-session; sysauth=router-session"},
+		"Connection": []string{"keep-alive"},
+		"User-Agent": []string{"test-browser"},
+	}
+	out := forwardLuciRequestHeaders(in)
+	if got := out.Get("Cookie"); got != "sysauth=router-session" {
+		t.Fatalf("router login cookie was not forwarded: %q", got)
+	}
+	if out.Get("Connection") != "" {
+		t.Fatal("hop-by-hop connection header was forwarded")
+	}
+	if out.Get("User-Agent") != "test-browser" {
+		t.Fatal("browser headers were not preserved")
+	}
+	if !safeHeader("Cookie") {
+		t.Fatal("router login cookie is not an allowed proxy header")
+	}
+}
+
+func TestSameOriginNormalizesEquivalentHTTPSOrigins(t *testing.T) {
+	for _, tc := range []struct {
+		expected, actual string
+		want            bool
+	}{
+		{"https://example.test", "https://EXAMPLE.TEST:443", true},
+		{"https://example.test:8445", "https://example.test:8445", true},
+		{"https://example.test:8445/", "https://example.test:8445", true},
+		{"https://example.test:8445", "https://example.test", false},
+		{"https://example.test:8445", "http://example.test:8445", false},
+		{"https://example.test:8445", "https://example.test:8445/path", false},
+	} {
+		if got := sameOrigin(tc.expected, tc.actual); got != tc.want {
+			t.Errorf("sameOrigin(%q, %q) = %v, want %v", tc.expected, tc.actual, got, tc.want)
+		}
+	}
+}
+
+func TestTunnelOriginAllowsAuthenticatedDashboardOrigin(t *testing.T) {
+	if !tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "https://dashboard.example:8445", false) {
+		t.Fatal("dashboard origin should be accepted for an authenticated tunnel session")
+	}
+	if tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "https://other.example:8445", false) {
+		t.Fatal("unrelated origin should remain rejected")
+	}
+	if !tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "null", true) {
+		t.Fatal("opaque LuCI origin should be accepted after session authentication")
+	}
+	if tunnelOriginAllowed("https://dashboard.example:8445", "session.dashboard.example:9443", "null", false) {
+		t.Fatal("opaque terminal origin should remain rejected")
+	}
+}
+
 func TestWsNetConnAdapter(t *testing.T) {
 	pr, pw := io.Pipe()
 	defer pr.Close()

@@ -8,9 +8,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export const DEVICE_TAB_VIEWS = [
   "devices",
   "groups",
-  "registration-requests",
-  "available-to-claim",
-  "add-devices",
 ] as const;
 
 interface DevicesAreaProps {
@@ -19,6 +16,7 @@ interface DevicesAreaProps {
   onSelectView: (view: string) => void;
   counts: {
     devices: number;
+    offline?: number;
     groups: number;
     awaiting: number;
     unclaimed: number;
@@ -40,44 +38,29 @@ export function DevicesArea({
     { value: "devices", label: "All devices", count: counts.devices },
     { value: "groups", label: "Groups", count: counts.groups },
   ];
-  if (isOrgAdmin) {
-    tabs.push(
-      {
-        value: "registration-requests",
-        label: "Awaiting",
-        count: counts.awaiting,
-      },
-      {
-        value: "available-to-claim",
-        label: "Unclaimed",
-        count: counts.unclaimed,
-      }
-    );
-  }
-
-  const activeTab = currentView === "add-devices" ? "devices" : currentView;
+  const activeTab = currentView === "groups" ? "groups" : "devices";
 
   return (
-    <div className="flex flex-col gap-4 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="flex min-h-full flex-col bg-background">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border bg-card px-6 pb-[18px] pt-6">
         <div>
-          <h1 className="font-display text-[21px] font-semibold text-foreground">
+          <h1 className="font-display text-[22px] font-semibold tracking-[-0.01em] text-foreground">
             Devices
           </h1>
-          <p className="mt-0.5 text-[13px] text-muted-foreground">
-            One place for devices, groups, and onboarding.
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            {counts.devices.toLocaleString()} enrolled · {(counts.offline ?? 0).toLocaleString()} offline
           </p>
         </div>
         {isOrgAdmin && (
-          <Button onClick={() => onSelectView("add-devices")}>
+          <Button onClick={() => onSelectView("onboarding")}>
             <Plus className="size-4" />
-            Add devices
+            Onboard devices
           </Button>
         )}
       </div>
 
       <Tabs value={activeTab} onValueChange={onSelectView}>
-        <TabsList>
+        <TabsList className="w-full gap-5 bg-card px-6">
           {tabs.map((t) => (
             <TabsTrigger key={t.value} value={t.value}>
               {t.label}
@@ -91,7 +74,7 @@ export function DevicesArea({
         </TabsList>
       </Tabs>
 
-      <div>{children}</div>
+      <div className="px-6 pb-6 pt-4">{children}</div>
     </div>
   );
 }

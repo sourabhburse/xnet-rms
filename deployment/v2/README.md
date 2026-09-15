@@ -22,8 +22,17 @@ It creates only:
 - `/opt/xnet-rms`, `/etc/xnet-rms`, `/var/lib/xnet-rms`.
 - Three named RMS systemd services and an RMS certificate renewal timer.
 - Private installation CA and collector signing material generated on the VPS.
-- Initial administrator credentials in `~ubuntu/.config/xnet-rms/initial-login.txt`.
+- One customer organization and one `ORG_ADMIN` account; no sample routers,
+  tokens, telemetry, profiles, alerts or demo users.
+- Initial organization administrator credentials in
+  `~ubuntu/.config/xnet-rms/initial-login.txt`.
 - Router public trust files in `~ubuntu/xnet-rms-router-trust`.
+
+The database migrations create schema and migration metadata only. The
+bootstrap step refuses to run against a database that already contains
+application data, and it never creates a `SUPER_ADMIN` account. The
+organization name and administrator email can be supplied through
+`RMS_ADMIN_ORG_NAME` and `RMS_ADMIN_EMAIL` before running the installer.
 
 | Service | Endpoint |
 |---|---|
@@ -36,8 +45,8 @@ Port 8443 is already occupied on this VPS. The installer does not modify Nginx,
 existing Mosquitto configuration, PostgreSQL cluster settings, or firewall rules.
 Inbound reachability of the new ports must be checked after installation.
 
-Test raw retention is **7 days**, summaries **30 days**. Production retention
-remains undecided. Each service has separate CPU/memory limits. These are initial
+Test raw retention is **30 days**, summaries **365 days**. Production retention
+should be revisited after capacity measurements. Each service has separate CPU/memory limits. These are initial
 test limits, not evidence of 10,000-router capacity.
 
 ## Verify

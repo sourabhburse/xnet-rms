@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,35 @@ import (
 )
 
 const MaxSnapshot = 64 * 1024
+const DeviceOverviewProfileID = "8f8d7a2c0d1e4b6aa1c2d3e4f5061728"
+
+func defaultDeviceOverviewProfile() (Profile, error) {
+	fields := make([]Field, 0, len(monitoringMetricCatalog))
+	seen := map[string]bool{}
+	for _, item := range monitoringMetricCatalog {
+		if item.SourceID == "device_overview" && item.Baseline && !seen[item.Field.ID] {
+			fields = append(fields, item.Field)
+			seen[item.Field.ID] = true
+		}
+	}
+	p := Profile{ID: DeviceOverviewProfileID, Version: 1, Name: "Device overview telemetry", SourceID: "device_overview", Type: "builtin", CollectorID: "device_overview", Interval: 60, Timeout: 10, MaxOutput: 32768, Fields: fields}
+	return p, p.Validate()
+}
+
+func assignDefaultTelemetry(tx *sql.Tx, deviceID string) error {
+	p, e := defaultDeviceOverviewProfile()
+	if e != nil {
+		return e
+	}
+	if _, e = tx.Exec("INSERT INTO profiles(id,version,name,definition,organization_id) VALUES($1,$2,$3,$4,NULL) ON CONFLICT(id,version) DO NOTHING", p.ID, p.Version, p.Name, string(raw(p))); e != nil {
+		return e
+	}
+	_, e = tx.Exec(`INSERT INTO assignments(device_id,profile_id,version,active)
+SELECT $1,p.id,p.version,true FROM profiles p
+WHERE p.id=$2 AND p.version=1
+ON CONFLICT(device_id,profile_id,version) DO UPDATE SET active=true`, deviceID, DeviceOverviewProfileID)
+	return e
+}
 
 type Field struct {
 	ID     string            `json:"id"`
@@ -46,6 +76,7 @@ type Profile struct {
 	Args          json.RawMessage `json:"args,omitempty"`
 	BundleID      string          `json:"bundle_id,omitempty"`
 	BundleVersion int             `json:"bundle_version,omitempty"`
+	CollectorID   string          `json:"collector_id,omitempty"`
 	Interval      int             `json:"interval_seconds"`
 	Timeout       int             `json:"timeout_seconds"`
 	MaxOutput     int             `json:"max_output_bytes"`
@@ -75,8 +106,12 @@ func (p Profile) Validate() error {
 		if !validID(p.BundleID) || p.BundleVersion < 1 {
 			return errors.New("approved bundle required")
 		}
+	} else if p.Type == "builtin" {
+		if p.CollectorID != "device_overview" && p.CollectorID != "ipsec" && p.CollectorID != "modbus_health" {
+			return errors.New("unsupported built-in collector")
+		}
 	} else {
-		return errors.New("only script and ubus collection supported")
+		return errors.New("only script, ubus and built-in collection supported")
 	}
 	seen := map[string]bool{}
 	for _, f := range p.Fields {
@@ -288,6 +323,21 @@ func (s *Core) Ingest(identity string, b []byte, now time.Time) error {
 	}
 	n, _ := res.RowsAffected()
 	if n > 0 {
+		if x.SourceID == "device_overview" {
+			var previousBoot string
+			e = tx.QueryRow("SELECT boot_id FROM current_snapshots WHERE device_id=$1 AND source_id=$2", identity, x.SourceID).Scan(&previousBoot)
+			if e != nil && e != sql.ErrNoRows {
+				return e
+			}
+			if e == nil && previousBoot != x.BootID {
+				_, e = tx.Exec(`INSERT INTO presence_hours(device_id,hour,reboots) VALUES($1,date_trunc('hour',$2::timestamptz),1)
+					ON CONFLICT(device_id,hour) DO UPDATE SET reboots=presence_hours.reboots+1`, identity, x.ObservedAt)
+				if e != nil {
+					return e
+				}
+			}
+			e = nil
+		}
 		_, e = tx.Exec(`INSERT INTO snapshot_history VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, identity, x.SourceID, x.ProfileID, x.ProfileVersion, x.ObservedAt, now, x.Status, string(x.Data), string(fb))
 		if e != nil {
 			return e
@@ -299,6 +349,9 @@ func (s *Core) Ingest(identity string, b []byte, now time.Time) error {
 		if e = markDirty(tx, x); e != nil {
 			return e
 		}
+		if e = s.evaluateThresholdsTx(tx, x, fields); e != nil {
+			return e
+		}
 	}
 	if e = tx.Commit(); e != nil {
 		return e
@@ -308,14 +361,20 @@ func (s *Core) Ingest(identity string, b []byte, now time.Time) error {
 
 func (s *Core) profiles(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	s.rows(w, `SELECT DISTINCT p.definition FROM profiles p WHERE $1='SUPER_ADMIN' OR EXISTS(SELECT 1 FROM assignments a JOIN devices d ON d.id=a.device_id WHERE a.profile_id=p.id AND a.version=p.version AND d.organization_id=$2)`, a.Role, a.Org)
+	s.rows(w, `SELECT row_to_json(t) FROM (SELECT p.id,p.version,p.organization_id,p.definition FROM profiles p WHERE $1 OR p.organization_id IS NULL OR p.organization_id=$2 ORDER BY p.name,p.id,p.version) t`, a.AllOrgs, a.Org)
+}
+
+type profileCreateRequest struct {
+	Profile
+	OrganizationID string `json:"organization_id"`
 }
 
 func (s *Core) createProfile(w http.ResponseWriter, r *http.Request) {
-	var p Profile
-	if !body(w, r, &p) {
+	var req profileCreateRequest
+	if !body(w, r, &req) {
 		return
 	}
+	p := req.Profile
 	if p.ID == "" {
 		p.ID = randomID()
 	}
@@ -331,12 +390,27 @@ func (s *Core) createProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	e := s.mutateAudit("", actor(r).ID, "profile.create", p.ID, "INSERT INTO profiles VALUES($1,$2,$3,$4)", p.ID, p.Version, p.Name, string(raw(p)))
+	a := actor(r)
+	org := req.OrganizationID
+	if a.Role != "SUPER_ADMIN" {
+		org = a.Org
+	} else if org != "" && !validID(org) {
+		fail(w, 400, "valid organization required")
+		return
+	}
+	if org != "" {
+		var exists bool
+		if e := s.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM organizations WHERE id=$1)", org).Scan(&exists); e != nil || !exists {
+			fail(w, 400, "organization not found")
+			return
+		}
+	}
+	e := s.mutateAudit(org, a.ID, "profile.create", p.ID, "INSERT INTO profiles(id,version,name,definition,organization_id) VALUES($1,$2,$3,$4,$5)", p.ID, p.Version, p.Name, string(raw(p)), nullableString(org))
 	if e != nil {
 		fail(w, 409, "profile version already exists or save failed")
 		return
 	}
-	output(w, 201, p)
+	output(w, 201, map[string]any{"id": p.ID, "version": p.Version, "organization_id": org, "definition": p})
 }
 
 func (s *Core) assignProfile(w http.ResponseWriter, r *http.Request) {
@@ -359,30 +433,22 @@ func (s *Core) assignProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var b []byte
-	e = tx.QueryRow("SELECT definition FROM profiles WHERE id=$1 AND version=$2", req.ID, req.Version).Scan(&b)
+	var deviceOrg string
+	e = tx.QueryRow("SELECT organization_id FROM devices WHERE id=$1", id).Scan(&deviceOrg)
+	if e == nil {
+		e = tx.QueryRow(`SELECT p.definition FROM profiles p WHERE p.id=$1 AND p.version=$2 AND (p.organization_id IS NULL OR p.organization_id=$3 OR $4='SUPER_ADMIN')`, req.ID, req.Version, deviceOrg, actor(r).Role).Scan(&b)
+	}
 	if e != nil {
 		fail(w, 404, "profile not found")
 		return
 	}
 	var p Profile
 	json.Unmarshal(b, &p)
-	_, e = tx.Exec("SELECT id FROM devices WHERE id=$1 FOR UPDATE", id)
 	if e == nil {
-		_, e = tx.Exec("UPDATE assignments SET active=false WHERE device_id=$1 AND profile_id IN(SELECT id FROM profiles WHERE definition->>'source_id'=$2)", id, p.SourceID)
+		e = assignProfileTx(tx, id, req.ID, req.Version, p.SourceID)
 	}
 	if e == nil {
-		_, e = tx.Exec("INSERT INTO assignments VALUES($1,$2,$3,true) ON CONFLICT(device_id,profile_id,version) DO UPDATE SET active=true", id, req.ID, req.Version)
-	}
-	if e == nil {
-		var count int
-		e = tx.QueryRow("SELECT count(*) FROM assignments WHERE device_id=$1 AND active", id).Scan(&count)
-		if count > 16 {
-			fail(w, 400, "at most 16 active sources per device")
-			return
-		}
-	}
-	if e == nil {
-		e = audit(tx, "", actor(r).ID, "profile.assign", id)
+		e = audit(tx, deviceOrg, actor(r).ID, "profile.assign", id)
 	}
 	if e != nil || tx.Commit() != nil {
 		fail(w, 409, "assignment failed")

@@ -103,7 +103,7 @@ The server supports these modes:
 | `tunnel` | Browser LuCI and terminal gateway |
 | `migrate` | Apply embedded PostgreSQL migrations |
 | `init-ca` | Create a local RMS CA and service certificates |
-| `admin` | Create the initial administrator account |
+| `admin` | Create the single initial organization and `ORG_ADMIN` account |
 
 ## Create a local PKI
 
@@ -141,6 +141,7 @@ DATABASE_URL="$DATABASE_URL" go run ./cmd/server -mode migrate
 Create the first local administrator once:
 
 ```sh
+RMS_ADMIN_ORG_NAME='Local Organization' \
 RMS_ADMIN_EMAIL='admin@localhost' \
 RMS_ADMIN_PASSWORD='use-a-local-password-only' \
 DATABASE_URL="$DATABASE_URL" \
@@ -171,8 +172,8 @@ export RMS_MQTT_URL='tls://localhost:8883'
 export RMS_MQTT_HOST='localhost'
 export RMS_TUNNEL_DOMAIN='localhost'
 export RMS_REVOKED_DIR="$PWD/../.local/revoked"
-export RMS_RAW_DAYS=7
-export RMS_SUMMARY_DAYS=30
+export RMS_RAW_DAYS=30
+export RMS_SUMMARY_DAYS=365
 mkdir -p "$RMS_REVOKED_DIR"
 go run ./cmd/server -mode core
 ```

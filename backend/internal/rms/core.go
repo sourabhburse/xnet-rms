@@ -9,6 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,17 +20,19 @@ import (
 )
 
 type Core struct {
-	DB      *sql.DB
-	Config  Config
-	CA      *Authority
-	Publish func(string, any) error
-	sshKeys sync.Map
+	DB       *sql.DB
+	Config   Config
+	CA       *Authority
+	Publish  func(string, any) error
+	sshKeys  sync.Map
+	previews sync.Map
 }
 type Actor struct {
-	ID    string `json:"id"`
-	Org   string `json:"organization_id"`
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	ID      string `json:"id"`
+	Org     string `json:"organization_id"`
+	Email   string `json:"email"`
+	Role    string `json:"role"`
+	AllOrgs bool   `json:"-"`
 }
 type actorKey struct{}
 
@@ -86,6 +89,8 @@ func (s *Core) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/registrations/preview", s.protect("ORG_ADMIN", s.previewCSV))
 	m.HandleFunc("GET /api/v1/tags", s.protect("VIEWER", s.tags))
 	m.HandleFunc("POST /api/v1/tags", s.protect("ORG_ADMIN", s.createTag))
+	m.HandleFunc("PUT /api/v1/devices/{id}/tags/{tag}", s.protect("ORG_ADMIN", s.deviceTag))
+	m.HandleFunc("DELETE /api/v1/devices/{id}/tags/{tag}", s.protect("ORG_ADMIN", s.deviceTag))
 	m.HandleFunc("GET /api/v1/groups", s.protect("VIEWER", s.groups))
 	m.HandleFunc("POST /api/v1/groups", s.protect("ORG_ADMIN", s.createGroup))
 	m.HandleFunc("PATCH /api/v1/groups/{id}", s.protect("ORG_ADMIN", s.updateGroup))
@@ -108,6 +113,24 @@ func (s *Core) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/devices", s.protect("VIEWER", s.listDevices))
 	m.HandleFunc("GET /api/v1/devices/{id}/snapshots", s.protect("VIEWER", s.snapshots))
 	m.HandleFunc("GET /api/v1/devices/{id}/history", s.protect("VIEWER", s.history))
+	m.HandleFunc("GET /api/v1/reports/telemetry", s.protect("VIEWER", s.telemetryReport))
+	m.HandleFunc("POST /api/v1/reports/telemetry/query", s.protect("VIEWER", s.telemetryReportQuery))
+	m.HandleFunc("POST /api/v1/reports/telemetry/export.csv", s.protect("VIEWER", s.telemetryReportCSV))
+	m.HandleFunc("GET /api/v1/monitoring/catalog", s.protect("VIEWER", s.monitoringCatalog))
+	m.HandleFunc("GET /api/v1/monitoring/templates", s.protect("VIEWER", s.monitoringTemplates))
+	m.HandleFunc("POST /api/v1/monitoring/templates", s.protect("ORG_ADMIN", s.createMonitoringTemplate))
+	m.HandleFunc("PATCH /api/v1/monitoring/templates/{id}", s.protect("ORG_ADMIN", s.updateMonitoringTemplate))
+	m.HandleFunc("DELETE /api/v1/monitoring/templates/{id}", s.protect("ORG_ADMIN", s.deleteMonitoringTemplate))
+	m.HandleFunc("GET /api/v1/monitoring/bindings", s.protect("VIEWER", s.monitoringBindings))
+	m.HandleFunc("POST /api/v1/monitoring/bindings", s.protect("ORG_ADMIN", s.createMonitoringBinding))
+	m.HandleFunc("PATCH /api/v1/monitoring/bindings/{id}", s.protect("ORG_ADMIN", s.mutateMonitoringBinding))
+	m.HandleFunc("DELETE /api/v1/monitoring/bindings/{id}", s.protect("ORG_ADMIN", s.mutateMonitoringBinding))
+	m.HandleFunc("GET /api/v1/devices/{id}/monitoring", s.protect("VIEWER", s.deviceMonitoring))
+	m.HandleFunc("POST /api/v1/monitoring/previews", s.protect("ORG_ADMIN", s.monitoringPreview))
+	m.HandleFunc("GET /api/v1/monitoring/previews/{id}", s.protect("ORG_ADMIN", s.monitoringPreviewStatus))
+	m.HandleFunc("GET /api/v1/alerts", s.protect("VIEWER", s.alerts))
+	m.HandleFunc("GET /api/v1/alerts/{id}", s.protect("VIEWER", s.alertDetail))
+	m.HandleFunc("POST /api/v1/alerts/{id}/acknowledge", s.protect("OPERATOR", s.acknowledgeAlert))
 	m.HandleFunc("POST /api/v1/devices/{id}/revoke", s.protect("SUPER_ADMIN", s.revoke))
 	m.HandleFunc("GET /api/v1/organizations", s.protect("SUPER_ADMIN", s.organizations))
 	m.HandleFunc("POST /api/v1/organizations", s.protect("SUPER_ADMIN", s.createOrganization))
@@ -120,18 +143,25 @@ func (s *Core) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/profiles", s.protect("VIEWER", s.profiles))
 	m.HandleFunc("POST /api/v1/profiles", s.protect("SUPER_ADMIN", s.createProfile))
 	m.HandleFunc("POST /api/v1/devices/{id}/profiles", s.protect("SUPER_ADMIN", s.assignProfile))
+	m.HandleFunc("POST /api/v1/groups/{id}/profiles", s.protect("SUPER_ADMIN", s.assignGroupProfile))
+	m.HandleFunc("POST /api/v1/tags/{id}/profiles", s.protect("SUPER_ADMIN", s.assignTagProfile))
 	m.HandleFunc("POST /api/v1/bundles", s.protect("SUPER_ADMIN", s.createBundle))
 	m.HandleFunc("GET /api/v1/bundles", s.protect("SUPER_ADMIN", s.bundles))
 	m.HandleFunc("GET /api/v1/audit-logs", s.protect("ORG_ADMIN", s.auditLogs))
 	m.HandleFunc("POST /api/v1/sessions", s.protect("OPERATOR", s.createSession))
 	m.HandleFunc("GET /api/v1/sessions", s.protect("OPERATOR", s.sessions))
+	m.HandleFunc("POST /api/v1/sessions/{id}/extend", s.protect("OPERATOR", s.extendSession))
 	m.HandleFunc("DELETE /api/v1/sessions/{id}", s.protect("OPERATOR", s.closeSession))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		if r.Method != "GET" && r.Header.Get("Origin") != "" && r.Header.Get("Origin") != s.Config.PublicURL {
-			fail(w, 403, "origin rejected")
-			return
+		if r.Method != "GET" {
+			origin := r.Header.Get("Origin")
+			if origin != "" && !sameOrigin(s.Config.PublicURL, origin) {
+				log.Printf("rms core origin rejected host=%q origin=%q expected=%q", r.Host, origin, s.Config.PublicURL)
+				fail(w, 403, "origin rejected")
+				return
+			}
 		}
 		if (r.URL.Path == "/api/v1/auth/login" || strings.HasPrefix(r.URL.Path, "/api/v1/provision/")) && !limiter.allow(r.RemoteAddr, time.Now()) {
 			fail(w, 429, "request limit reached; retry later")
@@ -164,11 +194,13 @@ func (s *Core) protect(role string, h http.HandlerFunc) http.HandlerFunc {
 		}
 		id, _ := claims.GetSubject()
 		var a Actor
-		e = s.DB.QueryRow("SELECT id,coalesce(organization_id,''),email,role FROM users WHERE id=$1 AND NOT disabled", id).Scan(&a.ID, &a.Org, &a.Email, &a.Role)
+		var org sql.NullString
+		e = s.DB.QueryRow("SELECT id,organization_id,email,role FROM users WHERE id=$1 AND NOT disabled", id).Scan(&a.ID, &org, &a.Email, &a.Role)
 		if e != nil {
 			fail(w, 401, "account unavailable")
 			return
 		}
+		a.Org, a.AllOrgs = org.String, a.Role == "SUPER_ADMIN"
 		if !roleAllows(a.Role, role) {
 			fail(w, 403, "insufficient permissions")
 			return
@@ -185,12 +217,14 @@ func (s *Core) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var a Actor
+	var org sql.NullString
 	var hash string
-	e := s.DB.QueryRow("SELECT id,coalesce(organization_id,''),email,role,password_hash FROM users WHERE email=$1 AND NOT disabled", strings.ToLower(req.Email)).Scan(&a.ID, &a.Org, &a.Email, &a.Role, &hash)
+	e := s.DB.QueryRow("SELECT id,organization_id,email,role,password_hash FROM users WHERE email=$1 AND NOT disabled", strings.ToLower(req.Email)).Scan(&a.ID, &org, &a.Email, &a.Role, &hash)
 	if e != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
 		fail(w, 401, "invalid credentials")
 		return
 	}
+	a.Org, a.AllOrgs = org.String, a.Role == "SUPER_ADMIN"
 	t := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": a.ID, "iss": "xnet-rms", "exp": time.Now().Add(8 * time.Hour).Unix()})
 	signed, e := t.SignedString([]byte(os.Getenv("JWT_SECRET")))
 	if e != nil {
@@ -226,7 +260,7 @@ func (s *Core) deviceIdentity(r *http.Request) (string, error) {
 func (s *Core) scopedDevice(r *http.Request, id string) bool {
 	a := actor(r)
 	var ok bool
-	s.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM devices WHERE id=$1 AND ($2='SUPER_ADMIN' OR organization_id=$3))", id, a.Role, a.Org).Scan(&ok)
+	s.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM devices WHERE id=$1 AND ($2 OR organization_id=$3))", id, a.AllOrgs, a.Org).Scan(&ok)
 	return ok
 }
 func (s *Core) rows(w http.ResponseWriter, q string, args ...any) {
@@ -237,25 +271,27 @@ func (s *Core) rows(w http.ResponseWriter, q string, args ...any) {
 	}
 	output(w, 200, v)
 }
-func scopedOrganization(r *http.Request, a Actor) (string, bool) {
+func scopedOrganization(r *http.Request, a *Actor) (string, bool) {
 	if a.Role != "SUPER_ADMIN" {
+		a.AllOrgs = false
 		return a.Org, true
 	}
 	org := r.URL.Query().Get("organization_id")
 	if org != "" && !validID(org) {
 		return "", false
 	}
+	a.AllOrgs = org == ""
 	return org, true
 }
 func (s *Core) dashboard(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	org, ok := scopedOrganization(r, a)
+	org, ok := scopedOrganization(r, &a)
 	if !ok {
 		fail(w, 400, "invalid organization")
 		return
 	}
 	var total, online, revoked int
-	err := s.DB.QueryRow("SELECT count(*),count(*) FILTER(WHERE last_seen>now()-interval '180 seconds' AND NOT revoked),count(*) FILTER(WHERE revoked) FROM devices WHERE $1='' OR organization_id=$1", org).Scan(&total, &online, &revoked)
+	err := s.DB.QueryRow("SELECT count(*),count(*) FILTER(WHERE last_seen>now()-interval '180 seconds' AND NOT revoked),count(*) FILTER(WHERE revoked) FROM devices WHERE $1 OR organization_id=$2", a.AllOrgs, org).Scan(&total, &online, &revoked)
 	if err != nil {
 		fail(w, 503, "dashboard unavailable")
 		return
@@ -264,7 +300,7 @@ func (s *Core) dashboard(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) listDevices(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	org, ok := scopedOrganization(r, a)
+	org, ok := scopedOrganization(r, &a)
 	if !ok {
 		fail(w, 400, "invalid organization")
 		return
@@ -281,14 +317,19 @@ func (s *Core) listDevices(w http.ResponseWriter, r *http.Request) {
 	source := r.URL.Query().Get("source")
 	field := r.URL.Query().Get("field")
 	value := r.URL.Query().Get("value")
-	filter := ` ($1='' OR d.organization_id=$1) AND ($2='' OR d.serial_number ILIKE '%'||$2||'%') AND ($6='' OR EXISTS(SELECT 1 FROM device_tags dt JOIN tags tg ON tg.id=dt.tag_id WHERE dt.device_id=d.id AND tg.name=$6)) AND ($3='' OR EXISTS(SELECT 1 FROM current_snapshots f WHERE f.device_id=d.id AND f.source_id=$3 AND f.fields->$4->>'value'=$5)) `
-	args := []any{org, q, source, field, value, r.URL.Query().Get("tag")}
+	status := r.URL.Query().Get("status")
+	if status != "" && status != "ONLINE" && status != "OFFLINE" && status != "REVOKED" {
+		fail(w, 400, "invalid status")
+		return
+	}
+	filter := ` ($1 OR d.organization_id=$2) AND ($3='' OR d.serial_number ILIKE '%'||$3||'%' OR d.name ILIKE '%'||$3||'%' OR d.lan_mac ILIKE '%'||$3||'%' OR d.model ILIKE '%'||$3||'%') AND ($7='' OR EXISTS(SELECT 1 FROM device_tags dt JOIN tags tg ON tg.id=dt.tag_id WHERE dt.device_id=d.id AND tg.name=$7)) AND ($4='' OR EXISTS(SELECT 1 FROM current_snapshots f WHERE f.device_id=d.id AND f.source_id=$4 AND f.fields->$5->>'value'=$6)) AND ($8='' OR CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END=$8) `
+	args := []any{a.AllOrgs, org, q, source, field, value, r.URL.Query().Get("tag"), status}
 	var total int
 	if s.DB.QueryRow("SELECT count(*) FROM devices d WHERE "+filter, args...).Scan(&total) != nil {
 		fail(w, 503, "query unavailable")
 		return
 	}
-	rows, e := jsonRows(s.DB, `SELECT row_to_json(t) FROM (SELECT d.id,d.organization_id,d.name,d.lan_mac,coalesce((SELECT jsonb_agg(t.name ORDER BY t.name) FROM device_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.device_id=d.id),'[]') AS tags,coalesce((SELECT jsonb_agg(g.name ORDER BY g.name) FROM device_group_members gm JOIN device_groups g ON g.id=gm.group_id WHERE gm.device_id=d.id),'[]') AS groups,d.serial_number,d.model,d.firmware_version,d.revoked,d.last_seen,CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END AS status,coalesce((SELECT jsonb_agg(jsonb_build_object('source_id',c.source_id,'fields',c.fields,'status',c.status,'received_at',c.received_at,'observed_at',c.observed_at,'stale',c.observed_at<now()-((p.definition->>'interval_seconds')::integer*2)*interval '1 second')) FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE c.device_id=d.id),'[]') AS sources FROM devices d WHERE `+filter+` ORDER BY serial_number LIMIT 100 OFFSET $7) t`, append(args, (page-1)*100)...)
+	rows, e := jsonRows(s.DB, `SELECT row_to_json(t) FROM (SELECT d.id,d.organization_id,d.name,d.lan_mac,coalesce((SELECT jsonb_agg(t.name ORDER BY t.name) FROM device_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.device_id=d.id),'[]') AS tags,coalesce((SELECT jsonb_agg(g.name ORDER BY g.name) FROM device_group_members gm JOIN device_groups g ON g.id=gm.group_id WHERE gm.device_id=d.id),'[]') AS groups,d.serial_number,d.model,d.firmware_version,d.revoked,d.last_seen,CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END AS status,coalesce((SELECT count(*) FROM alerts a WHERE a.device_id=d.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED')),0) AS active_alerts,CASE WHEN EXISTS(SELECT 1 FROM alerts a WHERE a.device_id=d.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED') AND a.severity='critical') THEN 'critical' WHEN EXISTS(SELECT 1 FROM alerts a WHERE a.device_id=d.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED')) THEN 'warning' ELSE 'healthy' END AS health,coalesce((SELECT jsonb_agg(jsonb_build_object('source_id',c.source_id,'fields',c.fields,'status',c.status,'received_at',c.received_at,'observed_at',c.observed_at,'stale',c.observed_at<now()-((p.definition->>'interval_seconds')::integer*2)*interval '1 second')) FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE c.device_id=d.id),'[]') AS sources FROM devices d WHERE `+filter+` ORDER BY serial_number LIMIT 100 OFFSET $9) t`, append(args, (page-1)*100)...)
 	if e != nil {
 		fail(w, 503, "query unavailable")
 		return
@@ -347,9 +388,12 @@ func (s *Core) createOrganization(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) users(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	org, ok := scopedOrganization(r, a)
-	if !ok { fail(w, 400, "invalid organization"); return }
-	s.rows(w, "SELECT row_to_json(t) FROM (SELECT id,organization_id,email,role,disabled FROM users WHERE $1='' OR organization_id=$1) t", org)
+	org, ok := scopedOrganization(r, &a)
+	if !ok {
+		fail(w, 400, "invalid organization")
+		return
+	}
+	s.rows(w, "SELECT row_to_json(t) FROM (SELECT id,organization_id,email,role,disabled FROM users WHERE $1 OR organization_id=$2) t", a.AllOrgs, org)
 }
 func (s *Core) createUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -432,9 +476,12 @@ func (s *Core) disableUser(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) tokens(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	org, ok := scopedOrganization(r, a)
-	if !ok { fail(w, 400, "invalid organization"); return }
-	s.rows(w, "SELECT row_to_json(t) FROM (SELECT e.id,e.organization_id,e.name,e.expires_at,e.max_uses,e.used_count,e.revoked,coalesce((SELECT jsonb_agg(g.id ORDER BY g.name) FROM enrollment_token_groups tg JOIN device_groups g ON g.id=tg.group_id WHERE tg.token_id=e.id),'[]') AS group_ids FROM enrollment_tokens e WHERE $1='' OR e.organization_id=$1) t", org)
+	org, ok := scopedOrganization(r, &a)
+	if !ok {
+		fail(w, 400, "invalid organization")
+		return
+	}
+	s.rows(w, "SELECT row_to_json(t) FROM (SELECT e.id,e.organization_id,e.name,e.expires_at,e.max_uses,e.used_count,e.revoked,coalesce((SELECT jsonb_agg(g.id ORDER BY g.name) FROM enrollment_token_groups tg JOIN device_groups g ON g.id=tg.group_id WHERE tg.token_id=e.id),'[]') AS group_ids FROM enrollment_tokens e WHERE $1 OR e.organization_id=$2) t", a.AllOrgs, org)
 }
 func (s *Core) createToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -465,17 +512,28 @@ func (s *Core) createToken(w http.ResponseWriter, r *http.Request) {
 	}
 	id := randomID()
 	tx, e := s.DB.Begin()
-	if e != nil { fail(w, 503, "database unavailable"); return }
+	if e != nil {
+		fail(w, 503, "database unavailable")
+		return
+	}
 	defer tx.Rollback()
 	_, e = tx.Exec("INSERT INTO enrollment_tokens(id,organization_id,name,token_hash,max_uses,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, req.Org, req.Name, digest(req.Token), req.MaxUses, req.ExpiresAt)
 	for _, groupID := range req.GroupIDs {
-		if e != nil { break }
+		if e != nil {
+			break
+		}
 		var groupOrg string
 		e = tx.QueryRow("SELECT organization_id FROM device_groups WHERE id=$1", groupID).Scan(&groupOrg)
-		if e == nil && groupOrg != req.Org { e = errors.New("group organization mismatch") }
-		if e == nil { _, e = tx.Exec("INSERT INTO enrollment_token_groups(token_id,group_id) VALUES($1,$2)", id, groupID) }
+		if e == nil && groupOrg != req.Org {
+			e = errors.New("group organization mismatch")
+		}
+		if e == nil {
+			_, e = tx.Exec("INSERT INTO enrollment_token_groups(token_id,group_id) VALUES($1,$2)", id, groupID)
+		}
 	}
-	if e == nil { e = audit(tx, req.Org, a.ID, "token.create", id) }
+	if e == nil {
+		e = audit(tx, req.Org, a.ID, "token.create", id)
+	}
 	if e != nil || tx.Commit() != nil {
 		fail(w, 409, "token creation failed")
 		return
@@ -512,9 +570,12 @@ func (s *Core) deleteToken(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Core) auditLogs(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	org, ok := scopedOrganization(r, a)
-	if !ok { fail(w, 400, "invalid organization"); return }
-	s.rows(w, "SELECT row_to_json(t) FROM (SELECT * FROM audit_logs WHERE $1='' OR organization_id=$1 ORDER BY id DESC LIMIT 500) t", org)
+	org, ok := scopedOrganization(r, &a)
+	if !ok {
+		fail(w, 400, "invalid organization")
+		return
+	}
+	s.rows(w, "SELECT row_to_json(t) FROM (SELECT * FROM audit_logs WHERE $1 OR organization_id=$2 ORDER BY id DESC LIMIT 500) t", a.AllOrgs, org)
 }
 func (s *Core) revoke(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -539,6 +600,9 @@ func (s *Core) revoke(w http.ResponseWriter, r *http.Request) {
 	var org string
 	e = tx.QueryRow("UPDATE devices SET revoked=true WHERE id=$1 RETURNING organization_id", id).Scan(&org)
 	if e == nil {
+		e = resolveDeviceAlertsTx(tx, id, "device_revoked", time.Now().UTC())
+	}
+	if e == nil {
 		var sessionIDs []string
 		sessionIDs, e = closeSessions(tx, "device_id", id)
 		if e == nil {
@@ -557,15 +621,4 @@ func (s *Core) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	output(w, 200, map[string]bool{"revoked": true})
-}
-func BootstrapAdmin(d *sql.DB, email, password string) error {
-	if len(password) < 12 || len(password) > 72 || !strings.Contains(email, "@") {
-		return errors.New("admin email and password of 12–72 bytes required")
-	}
-	hash, e := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if e != nil {
-		return e
-	}
-	_, e = d.Exec("INSERT INTO users(id,email,password_hash,role) VALUES($1,$2,$3,'SUPER_ADMIN')", randomID(), strings.ToLower(email), string(hash))
-	return e
 }

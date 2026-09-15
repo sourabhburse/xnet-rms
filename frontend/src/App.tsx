@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   AuditRecord,
@@ -22,24 +23,49 @@ import { AppShell } from './components/shell/AppShell';
 import { DevicesArea, DEVICE_TAB_VIEWS } from './components/devices/DevicesArea';
 import { Toaster } from './components/ui/sonner';
 import { useTheme } from './lib/use-theme';
+import { parseAppRoute, routeForDevice, routeForView } from './lib/routes';
+import { navigateSessionWindow, openSessionWindow } from './lib/session-window';
 import FleetOverview from './components/overview/FleetOverview';
 import DeviceList from './components/DeviceList';
 import DeviceDetail from './components/DeviceDetail';
-import AddDevices from './components/AddDevices';
-import AvailableToClaim from './components/AvailableToClaim';
-import RegistrationRequests from './components/RegistrationRequests';
+import Onboarding from './Onboarding';
 import TagsManager from './components/TagsManager';
 import GroupsManager from './components/GroupsManager';
 import SessionsManager from './components/SessionsManager';
 import AdminViews from './components/AdminViews';
+import ReportsView from './components/ReportsView';
+import AlertsView from './components/AlertsView';
 import Login from './Login';
 
+function LoadingScreen() {
+  return (
+    <main
+      className="grid min-h-dvh place-items-center bg-sidebar px-6"
+      aria-busy="true"
+      aria-label="Loading XNET RMS"
+    >
+      <img
+        src="/logo/svg/xnet-logo-loading.svg"
+        className="rms-loading-logo h-auto w-[min(320px,80vw)]"
+        alt="Loading XNET RMS"
+      />
+    </main>
+  );
+}
+
 export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { view, deviceSerial } = useMemo(
+    () => parseAppRoute(location.pathname, location.search),
+    [location.pathname, location.search]
+  );
   const [user, setUser] = useState<User | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
-  // Active navigation view
-  const [view, setView] = useState<string>('dashboard');
+  // The URL is the navigation source of truth. Keep the selected object as a
+  // short-lived cache so a clicked device opens immediately while its route
+  // can also be loaded directly in a new tab or after a refresh.
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
 
   // Organization scoping
@@ -50,9 +76,9 @@ export default function App() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [totalDevices, setTotalDevices] = useState<number>(0);
   const [page, setPage] = useState<number>(1);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedTag, setSelectedTag] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>(() => new URLSearchParams(window.location.search).get('q') || '');
+  const [selectedTag, setSelectedTag] = useState<string>(() => new URLSearchParams(window.location.search).get('tag') || '');
+  const [statusFilter, setStatusFilter] = useState<string>(() => new URLSearchParams(window.location.search).get('status') || '');
 
   // Auxiliary data
   const [stats, setStats] = useState<DashboardStats>({ total: 0, online: 0, offline: 0, revoked: 0 });
@@ -62,12 +88,32 @@ export default function App() {
   const [groups, setGroups] = useState<DeviceGroup[]>([]);
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [adminData, setAdminData] = useState<any[]>([]);
+  const [alertUnread, setAlertUnread] = useState(0);
 
   // UI state
   const [loading, setLoading] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [globalError, setGlobalError] = useState<string>('');
   const { theme, toggle: toggleTheme } = useTheme();
+
+  const isDeviceDetail = Boolean(deviceSerial);
+  const detailDevice =
+    selectedDevice?.serial_number === deviceSerial ? selectedDevice : null;
+
+  const goToView = (nextView: string) => {
+    setSelectedDevice(null);
+    setPage(1);
+    navigate(routeForView(nextView));
+  };
+
+  const selectDevice = (device: Device) => {
+    setSelectedDevice(device);
+    navigate(routeForDevice(device.serial_number));
+  };
+
+  useEffect(() => {
+    if (!deviceSerial) setSelectedDevice(null);
+  }, [deviceSerial]);
 
   // Initial Auth Verification
   useEffect(() => {
@@ -106,14 +152,16 @@ export default function App() {
       const isOperator = isOrgAdmin || user.role === 'OPERATOR';
 
       // Always fetch dashboard stats and tags
-      const [dashStats, tagList, groupList] = await Promise.all([
+      const [dashStats, tagList, groupList, alertSummary] = await Promise.all([
         api<DashboardStats>(`dashboard${selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : ''}`).catch(() => ({ total: 0, online: 0, offline: 0, revoked: 0 })),
         api<TagItem[]>('tags').catch(() => []),
         api<DeviceGroup[]>(`groups${selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : ''}`).catch(() => []),
+        api<{ unacknowledged: number }>(`alerts${selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : ''}`).catch(() => ({ unacknowledged: 0 })),
       ]);
       setStats(dashStats && typeof dashStats === 'object' ? dashStats : { total: 0, online: 0, offline: 0, revoked: 0 });
       setTags(Array.isArray(tagList) ? tagList : []);
       setGroups(Array.isArray(groupList) ? groupList : []);
+      setAlertUnread(alertSummary.unacknowledged || 0);
 
       // Fetch pending devices and registrations if admin
       if (isOrgAdmin) {
@@ -134,25 +182,31 @@ export default function App() {
       }
 
       // Fetch view-specific dataset
-      if (view === 'devices' || view === 'dashboard' || view === 'groups') {
+      if (view === 'devices' || view === 'dashboard' || view === 'groups' || view === 'reports') {
+        const lookupQuery = deviceSerial || searchQuery;
         const params = new URLSearchParams({
           page: String(page),
-          q: searchQuery,
-          tag: selectedTag,
+          q: lookupQuery,
+          tag: deviceSerial ? '' : selectedTag,
+          status: deviceSerial ? '' : ['ONLINE', 'OFFLINE', 'REVOKED'].includes(statusFilter) ? statusFilter : '',
         });
         if (selectedOrg) params.set('organization_id', selectedOrg);
         const res = await api<{ items: Device[]; total: number }>(`devices?${params}`);
-        let items = Array.isArray(res?.items) ? res.items : [];
-        if (statusFilter) {
-          items = items.filter(d => d.status === statusFilter);
-        }
+        const items = Array.isArray(res?.items) ? res.items : [];
         setDevices(items);
-        setTotalDevices(statusFilter ? items.length : (res?.total || 0));
+        setTotalDevices(res?.total || 0);
+        if (deviceSerial) {
+          const matched = items.find((item) => item.serial_number === deviceSerial);
+          setSelectedDevice(matched || null);
+          if (!matched) setGlobalError('The requested device was not found.');
+        }
       } else if (['users', 'enrollment-tokens', 'audit-logs', 'organizations', 'profiles', 'bundles'].includes(view)) {
         const suffix = selectedOrg && ['users', 'enrollment-tokens', 'audit-logs'].includes(view)
           ? `?organization_id=${encodeURIComponent(selectedOrg)}`
           : '';
-        const res = await api<any[]>(`${view}${suffix}`);
+        const endpoint = view === 'profiles' ? 'monitoring/templates' : view;
+        const templateSuffix = view === 'profiles' && selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : suffix;
+        const res = await api<any[]>(`${endpoint}${templateSuffix}`);
         setAdminData(Array.isArray(res) ? res : []);
       }
     } catch (err) {
@@ -173,17 +227,18 @@ export default function App() {
     if (user) {
       refreshData();
     }
-  }, [user, view, page, searchQuery, selectedTag, statusFilter, selectedOrg]);
+  }, [user, view, page, searchQuery, selectedTag, statusFilter, selectedOrg, deviceSerial]);
 
   // Periodic background refresh every 30 seconds
   useEffect(() => {
     if (!user) return;
     const interval = setInterval(refreshData, 30000);
     return () => clearInterval(interval);
-  }, [user, view, page, searchQuery, selectedTag, statusFilter, selectedOrg]);
+  }, [user, view, page, searchQuery, selectedTag, statusFilter, selectedOrg, deviceSerial]);
 
   // Remote LuCI Launcher (Server-Side SSH_LUCI)
   const handleOpenLuCI = async (dev: Device) => {
+    const sessionTab = openSessionWindow('LuCI');
     try {
       toast.loading(`Initiating LuCI session for ${dev.serial_number}...`, { id: 'luci' });
       const session = await api<{ id: string; expires_at: string; launch_url: string }>(
@@ -192,9 +247,10 @@ export default function App() {
         { device_id: dev.id, protocol: 'SSH_LUCI' }
       );
       toast.success('LuCI tunnel ready; router login required.', { id: 'luci' });
-      window.open(session.launch_url, '_blank');
+      navigateSessionWindow(sessionTab, session.launch_url);
       refreshData();
     } catch (err) {
+      if (sessionTab && !sessionTab.closed) sessionTab.close();
       const formatted = formatApiError(err);
       toast.dismiss('luci');
       const notify = formatted.type === 'error' ? toast.error : toast.warning;
@@ -204,6 +260,7 @@ export default function App() {
 
   // Remote Web Terminal Launcher (TERMINAL_SSH)
   const handleOpenTerminal = async (dev: Device) => {
+    const sessionTab = openSessionWindow('terminal');
     try {
       toast.loading(`Opening terminal for ${dev.serial_number}...`, { id: 'term' });
       const session = await api<{ id: string; expires_at: string; launch_url: string }>(
@@ -212,9 +269,10 @@ export default function App() {
         { device_id: dev.id, protocol: 'TERMINAL_SSH' }
       );
       toast.success('Terminal session authorized!', { id: 'term' });
-      window.open(session.launch_url, '_blank');
+      navigateSessionWindow(sessionTab, session.launch_url);
       refreshData();
     } catch (err) {
+      if (sessionTab && !sessionTab.closed) sessionTab.close();
       const formatted = formatApiError(err);
       toast.dismiss('term');
       toast.error(formatted.title, { description: formatted.message });
@@ -227,15 +285,12 @@ export default function App() {
     } catch {}
     setUser(null);
     setSelectedDevice(null);
+    navigate('/overview', { replace: true });
   };
 
   // Unauthenticated: Show NCMS-inspired Login Screen
   if (loadingUser) {
-    return (
-      <div className="grid min-h-screen place-items-center bg-background">
-        <p className="text-sm text-muted-foreground">Loading XNET RMS...</p>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   if (!user) {
@@ -249,10 +304,6 @@ export default function App() {
   const activeSessionCount = sessions.filter(s => !s.closed_at).length;
   const deviceTotal = stats.total || totalDevices;
 
-  const orgName =
-    organizations.find(o => o.id === (selectedOrg || user.organization_id))?.name ||
-    (user.role === 'SUPER_ADMIN' ? 'All customers' : 'Workspace');
-
   const viewTitles: Record<string, string> = {
     dashboard: 'Overview',
     devices: 'Devices',
@@ -260,9 +311,12 @@ export default function App() {
     'add-devices': 'Devices',
     'available-to-claim': 'Devices',
     'registration-requests': 'Devices',
+    onboarding: 'Onboarding',
     sessions: 'Sessions',
+    reports: 'Telemetry reports',
+    alerts: 'Alerts',
     tags: 'Customer tags',
-    users: 'Users',
+    users: 'Users & access',
     'enrollment-tokens': 'Enrollment tokens',
     profiles: 'Monitoring templates',
     'audit-logs': 'Audit records',
@@ -270,11 +324,17 @@ export default function App() {
     bundles: 'Collector bundles',
   };
 
-  const crumb = selectedDevice ? (
+  const crumb = detailDevice ? (
     <>
       <span>Devices</span>
       <span className="mx-1.5 text-muted-foreground">/</span>
-      <b>{selectedDevice.name || selectedDevice.serial_number}</b>
+      <b>{detailDevice.name || detailDevice.serial_number}</b>
+    </>
+  ) : deviceSerial ? (
+    <>
+      <span>Devices</span>
+      <span className="mx-1.5 text-muted-foreground">/</span>
+      <b>{deviceSerial}</b>
     </>
   ) : (
     <b>{viewTitles[view] || 'Overview'}</b>
@@ -286,7 +346,6 @@ export default function App() {
     <>
       <AppShell
         user={user}
-        orgName={orgName}
         organizations={organizations}
         selectedOrg={selectedOrg}
         onSelectOrg={orgId => {
@@ -294,20 +353,14 @@ export default function App() {
           setPage(1);
         }}
         currentView={view}
-        onSelectView={viewKey => {
-          setView(viewKey);
-          setSelectedDevice(null);
-          setPage(1);
-        }}
-        counts={{ devices: deviceTotal, sessions: activeSessionCount }}
+        onSelectView={goToView}
+        counts={{ devices: deviceTotal, sessions: activeSessionCount, alerts: alertUnread, onboarding: pendingCount + awaitingCount }}
         crumb={crumb}
         searchValue={searchQuery}
         onSearchChange={setSearchQuery}
         onSearchSubmit={value => {
           setSearchQuery(value);
-          setView('devices');
-          setSelectedDevice(null);
-          setPage(1);
+          goToView('devices');
         }}
         onRefresh={refreshData}
         refreshing={refreshing}
@@ -322,17 +375,23 @@ export default function App() {
           </div>
         )}
 
-        {selectedDevice ? (
-          <div className="p-6">
-            <DeviceDetail
-              device={selectedDevice}
-              user={user}
-              onBack={() => {
-                setSelectedDevice(null);
-                refreshData();
-              }}
-              onRefreshDevice={refreshData}
-            />
+        {isDeviceDetail ? (
+          <div className="min-h-full">
+            {detailDevice ? (
+              <DeviceDetail
+                device={detailDevice}
+                user={user}
+                onBack={() => goToView('devices')}
+                onRefreshDevice={refreshData}
+                sessions={sessions}
+                onRefreshSessions={refreshData}
+                tags={tags}
+              />
+            ) : (
+              <div className="rounded-xl border border-border bg-card p-8 text-sm text-muted-foreground">
+                Loading device details…
+              </div>
+            )}
           </div>
         ) : view === 'dashboard' ? (
           <FleetOverview
@@ -343,10 +402,10 @@ export default function App() {
             groups={groups}
             devices={devices}
             user={user}
-            onNavigate={v => setView(v)}
+            onNavigate={goToView}
             onSelectFilter={s => {
               setStatusFilter(s);
-              setView('devices');
+              goToView('devices');
             }}
             onOpenLuCI={handleOpenLuCI}
             onOpenTerminal={handleOpenTerminal}
@@ -355,12 +414,10 @@ export default function App() {
           <DevicesArea
             user={user}
             currentView={view}
-            onSelectView={v => {
-              setView(v);
-              setPage(1);
-            }}
+            onSelectView={goToView}
             counts={{
               devices: deviceTotal,
+              offline: stats.offline,
               groups: groups.length,
               awaiting: awaitingCount,
               unclaimed: pendingCount,
@@ -390,7 +447,7 @@ export default function App() {
                   setPage(1);
                 }}
                 onPageChange={setPage}
-                onSelectDevice={setSelectedDevice}
+                onSelectDevice={selectDevice}
                 onOpenLuCI={handleOpenLuCI}
                 onOpenTerminal={handleOpenTerminal}
               />
@@ -405,42 +462,10 @@ export default function App() {
                 onRefresh={refreshData}
               />
             )}
-            {view === 'add-devices' && (
-              <AddDevices
-                user={user}
-                organizations={organizations}
-                tags={tags}
-                selectedOrg={selectedOrg}
-                onSuccess={() => {
-                  refreshData();
-                  setView('registration-requests');
-                }}
-                onRefreshTags={refreshData}
-              />
-            )}
-            {view === 'available-to-claim' && (
-              <AvailableToClaim
-                user={user}
-                pendingDevices={pendingDevices}
-                loading={loading || refreshing}
-                tags={tags}
-                selectedOrg={selectedOrg}
-                onRefresh={refreshData}
-              />
-            )}
-            {view === 'registration-requests' && (
-              <RegistrationRequests
-                user={user}
-                registrations={registrations}
-                loading={loading || refreshing}
-                tags={tags}
-                selectedOrg={selectedOrg}
-                onRefresh={refreshData}
-              />
-            )}
           </DevicesArea>
         ) : (
           <div className="p-6">
+            {view === 'onboarding' && <Onboarding user={user} onRefresh={refreshData} />}
             {view === 'tags' && (
               <TagsManager
                 user={user}
@@ -460,6 +485,12 @@ export default function App() {
                 onRefresh={refreshData}
               />
             )}
+            {view === 'reports' && (
+              <ReportsView devices={devices} groups={groups} tags={tags} selectedOrg={selectedOrg} />
+            )}
+            {view === 'alerts' && (
+              <AlertsView user={user} selectedOrg={selectedOrg} onUnreadChange={setAlertUnread} />
+            )}
             {['users', 'enrollment-tokens', 'organizations', 'profiles', 'bundles', 'audit-logs'].includes(view) && (
               <AdminViews
                 view={view}
@@ -467,6 +498,7 @@ export default function App() {
                 data={adminData}
                 organizations={organizations}
                 groups={groups}
+                tags={tags}
                 selectedOrg={selectedOrg}
                 loading={loading || refreshing}
                 onRefresh={refreshData}
