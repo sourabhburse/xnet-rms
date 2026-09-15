@@ -1,6 +1,7 @@
 package rms
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"database/sql"
@@ -16,6 +17,10 @@ import (
 type Session struct {
 	ID            string     `json:"id"`
 	DeviceID      string     `json:"device_id"`
+	DeviceName    string     `json:"device_name,omitempty"`
+	DeviceSerial  string     `json:"device_serial,omitempty"`
+	DeviceModel   string     `json:"device_model,omitempty"`
+	DeviceFirmware string    `json:"device_firmware,omitempty"`
 	UserID        string     `json:"user_id"`
 	Protocol      string     `json:"protocol"`
 	ExpiresAt     time.Time  `json:"expires_at"`
@@ -380,7 +385,7 @@ func (s *Core) internalSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var x Session
-	e := s.DB.QueryRow(`SELECT s.id,s.device_id,s.user_id,s.protocol,s.expires_at,s.browser_hash FROM sessions s JOIN devices d ON d.id=s.device_id JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.closed_at IS NULL AND s.expires_at>now() AND NOT d.revoked AND NOT u.disabled AND u.role IN ('SUPER_ADMIN','ORG_ADMIN','OPERATOR') AND (u.role='SUPER_ADMIN' OR u.organization_id=d.organization_id)`, r.PathValue("id")).Scan(&x.ID, &x.DeviceID, &x.UserID, &x.Protocol, &x.ExpiresAt, &x.BrowserHash)
+	e := s.DB.QueryRow(`SELECT s.id,s.device_id,d.name,d.serial_number,d.model,d.firmware_version,s.user_id,s.protocol,s.expires_at,s.browser_hash FROM sessions s JOIN devices d ON d.id=s.device_id JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.closed_at IS NULL AND s.expires_at>now() AND NOT d.revoked AND NOT u.disabled AND u.role IN ('SUPER_ADMIN','ORG_ADMIN','OPERATOR') AND (u.role='SUPER_ADMIN' OR u.organization_id=d.organization_id)`, r.PathValue("id")).Scan(&x.ID, &x.DeviceID, &x.DeviceName, &x.DeviceSerial, &x.DeviceModel, &x.DeviceFirmware, &x.UserID, &x.Protocol, &x.ExpiresAt, &x.BrowserHash)
 	if e != nil {
 		fail(w, 403, "session inactive")
 		return
@@ -389,6 +394,23 @@ func (s *Core) internalSession(w http.ResponseWriter, r *http.Request) {
 		x.SSHPrivateKey = val.(string)
 	}
 	output(w, 200, x)
+}
+func (s *Core) internalExtend(w http.ResponseWriter, r *http.Request) {
+	if !internalOK(r) {
+		fail(w, 403, "service certificate required")
+		return
+	}
+	var a Actor
+	var org sql.NullString
+	e := s.DB.QueryRow(`SELECT u.id,u.organization_id,u.email,u.role
+		FROM sessions s JOIN users u ON u.id=s.user_id JOIN devices d ON d.id=s.device_id
+		WHERE s.id=$1 AND s.closed_at IS NULL AND s.expires_at>now() AND NOT d.revoked AND NOT u.disabled AND u.role IN ('SUPER_ADMIN','ORG_ADMIN','OPERATOR') AND (u.role='SUPER_ADMIN' OR u.organization_id=d.organization_id)`, r.PathValue("id")).Scan(&a.ID, &org, &a.Email, &a.Role)
+	if e != nil {
+		fail(w, 403, "session inactive")
+		return
+	}
+	a.Org, a.AllOrgs = org.String, a.Role == "SUPER_ADMIN"
+	s.extendSession(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, a)))
 }
 func (s *Core) internalClaim(w http.ResponseWriter, r *http.Request) {
 	if !internalOK(r) {
