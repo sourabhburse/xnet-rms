@@ -88,6 +88,7 @@ export default function App() {
   const [groups, setGroups] = useState<DeviceGroup[]>([]);
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [adminData, setAdminData] = useState<any[]>([]);
+  const [adminDataView, setAdminDataView] = useState<string | null>(null);
   const [alertUnread, setAlertUnread] = useState(0);
 
   // UI state
@@ -103,6 +104,7 @@ export default function App() {
   const goToView = (nextView: string) => {
     setSelectedDevice(null);
     setPage(1);
+    setAdminDataView(null);
     navigate(routeForView(nextView));
   };
 
@@ -208,6 +210,7 @@ export default function App() {
         const templateSuffix = view === 'profiles' && selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : suffix;
         const res = await api<any[]>(`${endpoint}${templateSuffix}`);
         setAdminData(Array.isArray(res) ? res : []);
+        setAdminDataView(view);
       }
     } catch (err) {
       const formatted = formatApiError(err);
@@ -495,7 +498,7 @@ export default function App() {
               <AdminViews
                 view={view}
                 currentUser={user}
-                data={adminData}
+                data={adminDataView === view ? adminData : []}
                 organizations={organizations}
                 groups={groups}
                 tags={tags}
