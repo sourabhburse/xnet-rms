@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <syslog.h>
 #include <sys/mount.h>
 
 #define RMS_SSH_RAM_DIR "/tmp/rms-ssh"
@@ -19,6 +20,7 @@ static pid_t tunnel_pid=0;
 static struct uloop_timeout ttl;
 static int running;
 static int s_mounted=0;
+static int s_created_dropbear_keys=0;
 static char active_session_id[33];
 static int control_pipe[2]={-1,-1};
 
@@ -36,8 +38,31 @@ static int write_all(int fd, const void *data, size_t len) {
 
 int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
     if (!rms_id(session_id) || !pubkey || strlen(pubkey) > 1024) return -1;
-    if (mkdir(RMS_SSH_RAM_DIR, 0700) != 0 && errno != EEXIST) return -1;
-    if (chmod(RMS_SSH_RAM_DIR, 0700) != 0) return -1;
+    if (mkdir(RMS_SSH_RAM_DIR, 0700) != 0 && errno != EEXIST) {
+        syslog(LOG_ERR, "niseva tunnel: cannot create temporary key directory: %s", strerror(errno));
+        return -1;
+    }
+    if (chmod(RMS_SSH_RAM_DIR, 0700) != 0) {
+        syslog(LOG_ERR, "niseva tunnel: cannot protect temporary key directory: %s", strerror(errno));
+        return -1;
+    }
+
+    /* mount(2) requires the bind target to exist. Password-only Dropbear
+     * images may not have authorized_keys until an operator creates it. */
+    struct stat target;
+    int target_exists = 1;
+    if (lstat(DROPBEAR_AUTH_KEYS, &target) != 0) {
+        if (errno != ENOENT) {
+            syslog(LOG_ERR, "niseva tunnel: cannot inspect %s: %s", DROPBEAR_AUTH_KEYS, strerror(errno));
+            rms_ssh_cleanup_key();
+            return -1;
+        }
+        target_exists = 0;
+    } else if (!S_ISREG(target.st_mode)) {
+        syslog(LOG_ERR, "niseva tunnel: refusing non-regular %s", DROPBEAR_AUTH_KEYS);
+        rms_ssh_cleanup_key();
+        return -1;
+    }
 
     char tmp[256];
     snprintf(tmp, sizeof(tmp), "%s/authorized_keys.tmp", RMS_SSH_RAM_DIR);
@@ -45,7 +70,7 @@ int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
     if (fd < 0) return -1;
 
     // Preserve existing permanent authorized_keys if present
-    int orig_fd = open(DROPBEAR_AUTH_KEYS, O_RDONLY);
+    int orig_fd = target_exists ? open(DROPBEAR_AUTH_KEYS, O_RDONLY) : -1;
     if (orig_fd >= 0) {
         char buf[512];
         ssize_t n;
@@ -78,9 +103,20 @@ int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
         return -1;
     }
 
+    if (!target_exists) {
+        int target_fd = open(DROPBEAR_AUTH_KEYS, O_WRONLY | O_CREAT | O_EXCL, 0600);
+        if (target_fd < 0) {
+            syslog(LOG_ERR, "niseva tunnel: cannot create %s: %s", DROPBEAR_AUTH_KEYS, strerror(errno));
+            rms_ssh_cleanup_key();
+            return -1;
+        }
+        close(target_fd);
+        s_created_dropbear_keys = 1;
+    }
+
     if (mount(RMS_SSH_RAM_KEYS, DROPBEAR_AUTH_KEYS, NULL, MS_BIND, NULL) != 0) {
-        unlink(RMS_SSH_RAM_KEYS);
-        rmdir(RMS_SSH_RAM_DIR);
+        syslog(LOG_ERR, "niseva tunnel: cannot bind temporary authorized_keys over %s: %s", DROPBEAR_AUTH_KEYS, strerror(errno));
+        rms_ssh_cleanup_key();
         return -1;
     }
     s_mounted = 1;
@@ -91,6 +127,11 @@ void rms_ssh_cleanup_key(void) {
     if (s_mounted) {
         umount2(DROPBEAR_AUTH_KEYS, MNT_DETACH);
         s_mounted = 0;
+    }
+    if (s_created_dropbear_keys) {
+        if (unlink(DROPBEAR_AUTH_KEYS) != 0 && errno != ENOENT)
+            syslog(LOG_ERR, "niseva tunnel: cannot remove temporary %s: %s", DROPBEAR_AUTH_KEYS, strerror(errno));
+        s_created_dropbear_keys = 0;
     }
     unlink(RMS_SSH_RAM_KEYS);
     rmdir(RMS_SSH_RAM_DIR);

@@ -11,7 +11,7 @@ extern size_t telemetry_queue_bytes(void);
 
 struct mosquitto *g_mosq = NULL;
 agent_config_t g_cfg = {0};
-int rms_tunnel_worker(const char *a, const char *b, const char *c, int d) { (void)a;(void)b;(void)c;(void)d; return 0; }
+int rms_tunnel_worker(const char *a, const char *b, const char *c, int d, int e) { (void)a;(void)b;(void)c;(void)d;(void)e; return 0; }
 int uloop_timeout_set(struct uloop_timeout *t, int ms) { (void)t; (void)ms; return 0; }
 int uloop_timeout_cancel(struct uloop_timeout *t) { (void)t; return 0; }
 void rms_collect_tick(void) {}
