@@ -21,8 +21,10 @@ existing=$(runuser -u postgres -- psql -XAt -v ON_ERROR_STOP=1 -d postgres -c "S
 password=$(openssl rand -hex 32)
 jwt=$(openssl rand -hex 32)
 adminpass=$(openssl rand -hex 16)
+superpass=$(openssl rand -hex 16)
 adminemail="${RMS_ADMIN_EMAIL:-admin@xnet-rms.test}"
 adminorg="${RMS_ADMIN_ORG_NAME:-XNET RMS Test}"
+superemail="${RMS_SUPER_ADMIN_EMAIL:-superadmin@xnet-rms.test}"
 # Passwords are generated on this host and are not printed.
 runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -d postgres >/dev/null <<SQL
 CREATE ROLE xnet_rms_v2 LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$password';
@@ -47,9 +49,12 @@ source /etc/xnet-rms/core.env
 set +a
 /opt/xnet-rms/xnet-rms -mode migrate
 RMS_ADMIN_ORG_NAME="$adminorg" RMS_ADMIN_EMAIL="$adminemail" RMS_ADMIN_PASSWORD="$adminpass" /opt/xnet-rms/xnet-rms -mode admin
+RMS_SUPER_ADMIN_EMAIL="$superemail" RMS_SUPER_ADMIN_PASSWORD="$superpass" /opt/xnet-rms/xnet-rms -mode super-admin
 install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/.config/xnet-rms
 printf 'URL: https://xnet-rms-test.duckdns.org:8445\nOrganization: %s\nEmail: %s\nRole: ORG_ADMIN\nPassword: %s\n' "$adminorg" "$adminemail" "$adminpass" > /home/ubuntu/.config/xnet-rms/initial-login.txt
+printf 'URL: https://xnet-rms-test.duckdns.org:8445\nEmail: %s\nRole: SUPER_ADMIN\nPassword: %s\n' "$superemail" "$superpass" > /home/ubuntu/.config/xnet-rms/initial-super-admin-login.txt
 chown ubuntu:ubuntu /home/ubuntu/.config/xnet-rms/initial-login.txt
+chown ubuntu:ubuntu /home/ubuntu/.config/xnet-rms/initial-super-admin-login.txt
 install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/xnet-rms-router-trust
 cat /etc/xnet-rms/authority/ca.crt /usr/share/ca-certificates/mozilla/ISRG_Root_X1.crt > /home/ubuntu/xnet-rms-router-trust/ca.crt
 install -m 0644 /etc/xnet-rms/authority/collector.pub /home/ubuntu/xnet-rms-router-trust/collector.pub
@@ -57,6 +62,6 @@ chown -R ubuntu:ubuntu /home/ubuntu/xnet-rms-router-trust
 install -m 0644 xnet-rms-certificates.service xnet-rms-certificates.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now xnet-rms-mqtt.service xnet-rms-core.service xnet-rms-tunnel.service xnet-rms-certificates.timer
-echo 'RMS test services installed. Initial login is in ~/.config/xnet-rms/initial-login.txt for ubuntu.'
+echo 'RMS test services installed. Organization and platform logins are in ~/.config/xnet-rms/ for ubuntu.'
 echo 'Ports: core 8445, MQTT 8883, tunnel 9443. Existing web/MQTT services were not reconfigured.'
 echo 'Firewall reachability, enrollment, router operation and backup destination still require verification.'

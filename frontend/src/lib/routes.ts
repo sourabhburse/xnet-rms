@@ -10,6 +10,7 @@ const ADMIN_VIEWS = new Set([
   "tags",
   "audit-logs",
   "organizations",
+  "products",
   "bundles",
 ]);
 
@@ -101,6 +102,7 @@ export function routeForView(view: string): string {
     case "tags":
     case "audit-logs":
     case "organizations":
+    case "products":
     case "bundles":
       return `/admin/${view}`;
     case "enrollment-tokens":

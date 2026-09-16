@@ -133,14 +133,21 @@ func (s *Core) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/alerts/{id}", s.protect("VIEWER", s.alertDetail))
 	m.HandleFunc("POST /api/v1/alerts/{id}/acknowledge", s.protect("OPERATOR", s.acknowledgeAlert))
 	m.HandleFunc("POST /api/v1/devices/{id}/revoke", s.protect("SUPER_ADMIN", s.revoke))
+	m.HandleFunc("POST /api/v1/devices/{id}/release-identity", s.protect("SUPER_ADMIN", s.releaseDeviceIdentity))
+	m.HandleFunc("GET /api/v1/products", s.protect("VIEWER", s.products))
+	m.HandleFunc("POST /api/v1/products", s.protect("SUPER_ADMIN", s.createProduct))
+	m.HandleFunc("PATCH /api/v1/products/{id}", s.protect("SUPER_ADMIN", s.updateProduct))
+	m.HandleFunc("DELETE /api/v1/products/{id}", s.protect("SUPER_ADMIN", s.archiveProduct))
 	m.HandleFunc("GET /api/v1/organizations", s.protect("SUPER_ADMIN", s.organizations))
 	m.HandleFunc("POST /api/v1/organizations", s.protect("SUPER_ADMIN", s.createOrganization))
 	m.HandleFunc("GET /api/v1/users", s.protect("ORG_ADMIN", s.users))
 	m.HandleFunc("POST /api/v1/users", s.protect("ORG_ADMIN", s.createUser))
+	m.HandleFunc("PATCH /api/v1/users/{id}", s.protect("ORG_ADMIN", s.updateUser))
 	m.HandleFunc("POST /api/v1/users/{id}/disable", s.protect("ORG_ADMIN", s.disableUser))
-	m.HandleFunc("GET /api/v1/enrollment-tokens", s.protect("ORG_ADMIN", s.tokens))
-	m.HandleFunc("POST /api/v1/enrollment-tokens", s.protect("ORG_ADMIN", s.createToken))
-	m.HandleFunc("DELETE /api/v1/enrollment-tokens/{id}", s.protect("ORG_ADMIN", s.deleteToken))
+	m.HandleFunc("POST /api/v1/users/{id}/enable", s.protect("ORG_ADMIN", s.enableUser))
+	m.HandleFunc("GET /api/v1/enrollment-tokens", s.protect("SUPER_ADMIN", s.tokens))
+	m.HandleFunc("POST /api/v1/enrollment-tokens", s.protect("SUPER_ADMIN", s.createToken))
+	m.HandleFunc("DELETE /api/v1/enrollment-tokens/{id}", s.protect("SUPER_ADMIN", s.deleteToken))
 	m.HandleFunc("GET /api/v1/profiles", s.protect("VIEWER", s.profiles))
 	m.HandleFunc("POST /api/v1/profiles", s.protect("SUPER_ADMIN", s.createProfile))
 	m.HandleFunc("POST /api/v1/devices/{id}/profiles", s.protect("SUPER_ADMIN", s.assignProfile))
@@ -323,14 +330,14 @@ func (s *Core) listDevices(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid status")
 		return
 	}
-	filter := ` ($1 OR d.organization_id=$2) AND ($3='' OR d.serial_number ILIKE '%'||$3||'%' OR d.name ILIKE '%'||$3||'%' OR d.lan_mac ILIKE '%'||$3||'%' OR d.model ILIKE '%'||$3||'%') AND ($7='' OR EXISTS(SELECT 1 FROM device_tags dt JOIN tags tg ON tg.id=dt.tag_id WHERE dt.device_id=d.id AND tg.name=$7)) AND ($4='' OR EXISTS(SELECT 1 FROM current_snapshots f WHERE f.device_id=d.id AND f.source_id=$4 AND f.fields->$5->>'value'=$6)) AND ($8='' OR CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END=$8) `
+	filter := ` ($1 OR d.organization_id=$2) AND ($3='' OR d.serial_number ILIKE '%'||$3||'%' OR d.name ILIKE '%'||$3||'%' OR EXISTS(SELECT 1 FROM jsonb_each_text(d.identifiers) i WHERE i.value ILIKE '%'||$3||'%') OR d.model ILIKE '%'||$3||'%') AND ($7='' OR EXISTS(SELECT 1 FROM device_tags dt JOIN tags tg ON tg.id=dt.tag_id WHERE dt.device_id=d.id AND tg.name=$7)) AND ($4='' OR EXISTS(SELECT 1 FROM current_snapshots f WHERE f.device_id=d.id AND f.source_id=$4 AND f.fields->$5->>'value'=$6)) AND ($8='' OR CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END=$8) `
 	args := []any{a.AllOrgs, org, q, source, field, value, r.URL.Query().Get("tag"), status}
 	var total int
 	if s.DB.QueryRow("SELECT count(*) FROM devices d WHERE "+filter, args...).Scan(&total) != nil {
 		fail(w, 503, "query unavailable")
 		return
 	}
-	rows, e := jsonRows(s.DB, `SELECT row_to_json(t) FROM (SELECT d.id,d.organization_id,d.name,d.lan_mac,coalesce((SELECT jsonb_agg(t.name ORDER BY t.name) FROM device_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.device_id=d.id),'[]') AS tags,coalesce((SELECT jsonb_agg(g.name ORDER BY g.name) FROM device_group_members gm JOIN device_groups g ON g.id=gm.group_id WHERE gm.device_id=d.id),'[]') AS groups,d.serial_number,d.model,d.firmware_version,d.revoked,d.last_seen,CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END AS status,coalesce((SELECT count(*) FROM alerts a WHERE a.device_id=d.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED')),0) AS active_alerts,CASE WHEN EXISTS(SELECT 1 FROM alerts a WHERE a.device_id=d.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED') AND a.severity='critical') THEN 'critical' WHEN EXISTS(SELECT 1 FROM alerts a WHERE a.device_id=d.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED')) THEN 'warning' ELSE 'healthy' END AS health,coalesce((SELECT jsonb_agg(jsonb_build_object('source_id',c.source_id,'fields',c.fields,'status',c.status,'received_at',c.received_at,'observed_at',c.observed_at,'stale',c.observed_at<now()-((p.definition->>'interval_seconds')::integer*2)*interval '1 second')) FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE c.device_id=d.id),'[]') AS sources FROM devices d WHERE `+filter+` ORDER BY serial_number LIMIT 100 OFFSET $9) t`, append(args, (page-1)*100)...)
+	rows, e := jsonRows(s.DB, `SELECT row_to_json(t) FROM (SELECT d.id,d.organization_id,d.name,d.identifiers,d.product_id,coalesce((SELECT jsonb_agg(t.name ORDER BY t.name) FROM device_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.device_id=d.id),'[]') AS tags,coalesce((SELECT jsonb_agg(g.name ORDER BY g.name) FROM device_group_members gm JOIN device_groups g ON g.id=gm.group_id WHERE gm.device_id=d.id),'[]') AS groups,d.serial_number,d.model,d.firmware_version,d.revoked,d.last_seen,CASE WHEN d.revoked THEN 'REVOKED' WHEN d.last_seen>now()-interval '180 seconds' THEN 'ONLINE' ELSE 'OFFLINE' END AS status,coalesce((SELECT count(*) FROM alerts a WHERE a.device_id=d.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED')),0) AS active_alerts,CASE WHEN EXISTS(SELECT 1 FROM alerts a WHERE a.device_id=d.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED') AND a.severity='critical') THEN 'critical' WHEN EXISTS(SELECT 1 FROM alerts a WHERE a.device_id=d.id AND a.status IN ('PENDING','OPEN','ACKNOWLEDGED')) THEN 'warning' ELSE 'healthy' END AS health,coalesce((SELECT jsonb_agg(jsonb_build_object('source_id',c.source_id,'fields',c.fields,'status',c.status,'received_at',c.received_at,'observed_at',c.observed_at,'stale',c.observed_at<now()-((p.definition->>'interval_seconds')::integer*2)*interval '1 second')) FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE c.device_id=d.id),'[]') AS sources FROM devices d WHERE `+filter+` ORDER BY serial_number LIMIT 100 OFFSET $9) t`, append(args, (page-1)*100)...)
 	if e != nil {
 		fail(w, 503, "query unavailable")
 		return
@@ -436,6 +443,152 @@ func (s *Core) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 	output(w, 201, map[string]string{"id": id})
 }
+
+type updateUserRequest struct {
+	Email    *string `json:"email"`
+	Password *string `json:"password"`
+	Role     *string `json:"role"`
+	Org      *string `json:"organization_id"`
+}
+
+func (s *Core) updateUser(w http.ResponseWriter, r *http.Request) {
+	var req updateUserRequest
+	if !body(w, r, &req) {
+		return
+	}
+	a, id := actor(r), r.PathValue("id")
+	if req.Email == nil && req.Password == nil && req.Role == nil && req.Org == nil {
+		fail(w, 400, "at least one user field is required")
+		return
+	}
+	if id == a.ID && req.Role != nil {
+		fail(w, 400, "cannot change your own role")
+		return
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		fail(w, 503, "update unavailable")
+		return
+	}
+	defer tx.Rollback()
+	var currentOrg sql.NullString
+	var currentEmail, currentRole, passwordHash string
+	err = tx.QueryRow("SELECT organization_id,email,role,password_hash FROM users WHERE id=$1 FOR UPDATE", id).Scan(&currentOrg, &currentEmail, &currentRole, &passwordHash)
+	if err == sql.ErrNoRows {
+		fail(w, 404, "user not found")
+		return
+	}
+	if err != nil {
+		fail(w, 503, "update unavailable")
+		return
+	}
+	if currentRole == "SUPER_ADMIN" {
+		fail(w, 403, "super administrators are managed outside the API")
+		return
+	}
+	if a.Role != "SUPER_ADMIN" && currentOrg.String != a.Org {
+		fail(w, 404, "user not found")
+		return
+	}
+	newEmail, newRole, newOrg, newHash := currentEmail, currentRole, currentOrg.String, passwordHash
+	if req.Email != nil {
+		newEmail = strings.ToLower(strings.TrimSpace(*req.Email))
+		if !strings.Contains(newEmail, "@") || len(newEmail) > 320 {
+			fail(w, 400, "valid email required")
+			return
+		}
+	}
+	if req.Password != nil {
+		if len(*req.Password) < 12 || len(*req.Password) > 72 {
+			fail(w, 400, "password must be 12–72 bytes")
+			return
+		}
+		var hash []byte
+		hash, err = bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			fail(w, 400, "invalid password")
+			return
+		}
+		newHash = string(hash)
+	}
+	if req.Role != nil {
+		newRole = *req.Role
+		if newRole != "ORG_ADMIN" && newRole != "OPERATOR" && newRole != "VIEWER" {
+			fail(w, 400, "invalid role")
+			return
+		}
+	}
+	if req.Org != nil {
+		if a.Role != "SUPER_ADMIN" {
+			fail(w, 403, "only super administrators can move users between organizations")
+			return
+		}
+		newOrg = strings.TrimSpace(*req.Org)
+	}
+	if !validID(newOrg) {
+		fail(w, 400, "valid organization required")
+		return
+	}
+	var organizationExists bool
+	if err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM organizations WHERE id=$1)", newOrg).Scan(&organizationExists); err != nil {
+		fail(w, 503, "organization lookup unavailable")
+		return
+	}
+	if !organizationExists {
+		fail(w, 400, "organization not found")
+		return
+	}
+	var sessions []string
+	changedCredentials := newEmail != currentEmail || newHash != passwordHash
+	changedScope := newOrg != currentOrg.String
+	_, err = tx.Exec("UPDATE users SET email=$2,password_hash=$3,role=$4,organization_id=$5 WHERE id=$1", id, newEmail, newHash, newRole, newOrg)
+	if err == nil && (changedCredentials || changedScope) {
+		sessions, err = closeSessions(tx, "user_id", id)
+	}
+	if err == nil {
+		err = audit(tx, newOrg, a.ID, "user.update", id)
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		fail(w, 409, "user update failed")
+		return
+	}
+	for _, sessionID := range sessions {
+		s.sshKeys.Delete(sessionID)
+	}
+	output(w, 200, map[string]any{"id": id, "email": newEmail, "role": newRole, "organization_id": newOrg})
+}
+
+func (s *Core) enableUser(w http.ResponseWriter, r *http.Request) {
+	a, id := actor(r), r.PathValue("id")
+	tx, err := s.DB.Begin()
+	if err != nil {
+		fail(w, 503, "update unavailable")
+		return
+	}
+	defer tx.Rollback()
+	var org sql.NullString
+	err = tx.QueryRow("UPDATE users SET disabled=false WHERE id=$1 AND role<>'SUPER_ADMIN' AND ($2='SUPER_ADMIN' OR organization_id=$3) RETURNING organization_id", id, a.Role, a.Org).Scan(&org)
+	if err == sql.ErrNoRows {
+		fail(w, 404, "user not found")
+		return
+	}
+	if err != nil {
+		fail(w, 503, "update unavailable")
+		return
+	}
+	if err = audit(tx, org.String, a.ID, "user.enable", id); err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		fail(w, 503, "update unavailable")
+		return
+	}
+	output(w, 200, map[string]bool{"disabled": false})
+}
+
 func (s *Core) disableUser(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
 	id := r.PathValue("id")
@@ -498,11 +651,8 @@ func (s *Core) createToken(w http.ResponseWriter, r *http.Request) {
 	}
 	a := actor(r)
 	if a.Role != "SUPER_ADMIN" {
-		req.Org = a.Org
-		if req.Token != "" {
-			fail(w, 403, "only platform administrators import tokens")
-			return
-		}
+		fail(w, 403, "only super administrators can create enrollment tokens")
+		return
 	}
 	if req.Token == "" {
 		req.Token = secret()
@@ -554,7 +704,7 @@ func (s *Core) deleteToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var org string
-	e = tx.QueryRow("UPDATE enrollment_tokens SET revoked=true WHERE id=$1 AND ($2='SUPER_ADMIN' OR organization_id=$3) RETURNING organization_id", r.PathValue("id"), a.Role, a.Org).Scan(&org)
+	e = tx.QueryRow("UPDATE enrollment_tokens SET revoked=true WHERE id=$1 RETURNING organization_id", r.PathValue("id")).Scan(&org)
 	if e != nil {
 		fail(w, 404, "token not found")
 		return
@@ -622,4 +772,50 @@ func (s *Core) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	output(w, 200, map[string]bool{"revoked": true})
+}
+
+// releaseDeviceIdentity frees a device's serial_number so it can be
+// re-enrolled from scratch under a new device id. Enrollment doesn't require
+// a serial to be pre-registered to a tenant (bulk fleets enroll without
+// pre-registration), so a serial can be claimed by the wrong organization
+// before the genuine device ever boots; the genuine device then permanently
+// fails enrollment with an identity conflict it cannot resolve on its own
+// (certificate recovery requires signing with the squatter's key, which it
+// doesn't have). This gives support/SUPER_ADMIN a way to resolve that after
+// verifying the conflict out of band.
+//
+// The row itself is kept (renamed, not deleted) rather than deleted outright:
+// several tables reference devices without ON DELETE CASCADE (assignments,
+// snapshot history, sessions, tags, ...), so a hard delete would fail once
+// the device has any history, which enroll() always gives it immediately via
+// assignDefaultTelemetry. Revocation is required first because it's what
+// stops the squatter's already-issued certificate from continuing to
+// authenticate as this device id - renaming serial_number alone would not.
+func (s *Core) releaseDeviceIdentity(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(id) {
+		fail(w, 400, "invalid device")
+		return
+	}
+	tx, e := s.DB.Begin()
+	if e != nil {
+		fail(w, 503, "database unavailable")
+		return
+	}
+	defer tx.Rollback()
+	var org, serial string
+	e = tx.QueryRow("SELECT organization_id,serial_number FROM devices WHERE id=$1 AND revoked FOR UPDATE", id).Scan(&org, &serial)
+	if e != nil {
+		fail(w, 409, "device not found or not revoked; revoke it first")
+		return
+	}
+	if _, e = tx.Exec("UPDATE devices SET serial_number=$2 WHERE id=$1", id, "released:"+id); e != nil {
+		fail(w, 503, "release failed")
+		return
+	}
+	if e = audit(tx, org, actor(r).ID, "device.release_identity", id); e != nil || tx.Commit() != nil {
+		fail(w, 503, "release failed")
+		return
+	}
+	output(w, 200, map[string]string{"device_id": id, "released_serial": serial})
 }

@@ -116,8 +116,8 @@ The URL is the navigation source of truth. Current routes cover:
 - device detail, groups, registrations, and pending claims;
 - active remote sessions;
 - telemetry reports and alerts;
-- customer tags, users, enrollment tokens, organizations, profiles, bundles,
-  and audit records.
+- customer tags, users, enrollment tokens, organizations, products, profiles,
+  bundles, and audit records.
 
 The dashboard does not talk directly to PostgreSQL, Mosquitto, or the router.
 It asks the core to perform every state-changing operation. Remote LuCI and
@@ -137,8 +137,9 @@ Responsibilities in `backend/internal/rms`:
 | Authentication | Login, eight-hour HS256 JWT, secure HTTP-only cookie, and disabled-user checks |
 | Authorization | Hierarchical roles: `VIEWER` → `OPERATOR` → `ORG_ADMIN` → `SUPER_ADMIN` |
 | Tenant isolation | Organization scoping in handlers and SQL predicates; super-admin may select a customer scope |
-| Onboarding | Registration records, pending devices, token use, claim/activation, tags, and groups |
-| Device identity | Device certificate CN, public-key match, revocation checks, and device mTLS |
+| Onboarding | Registration records, pending devices, super-admin-created token use, claim/activation, tags, and groups |
+| Device identity | Serial-rooted identity claims, product-specific MAC/IMEI/custom identifiers, device certificate CN, public-key match, revocation checks, and device mTLS |
+| Product catalog | Versioned product identity schemas, model matching, capabilities, and default telemetry profiles |
 | Telemetry | Snapshot envelope validation, deduplication, current state, history, rollups, and ACKs |
 | Monitoring | Catalog metrics, versioned templates, device/group/tag bindings, effective profiles, and previews |
 | Alerts | Threshold evaluation, debounce, escalation, acknowledgement, resolution, and event history |

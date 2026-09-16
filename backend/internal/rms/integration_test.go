@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -86,7 +87,7 @@ func TestPostgresLifecycle(t *testing.T) {
 	}
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	csr, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, key)
-	enrollment := map[string]any{"serial_number": "XE33-test", "model": "XE33 2S", "firmware_version": "test", "agent_version": "2.3.0", "enrollment_token": token, "csr": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr}))}
+	enrollment := map[string]any{"serial_number": "XE33-test", "lan_mac": "00:1E:42:16:B0:81", "model": "XE33 2S", "firmware_version": "test", "agent_version": "2.3.0", "enrollment_token": token, "csr": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr}))}
 	w := request("POST", "/api/v1/provision/check-in", "", enrollment)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
@@ -446,5 +447,18 @@ func TestFreshInstallBootstrapDataContract(t *testing.T) {
 	}
 	if e = BootstrapOrgAdmin(db, "second@example.com", "local-bootstrap-password", "Second Organization"); e == nil {
 		t.Fatal("bootstrap allowed a second administrator on a non-empty database")
+	}
+	if e = BootstrapSuperAdmin(db, "platform@example.com", "local-bootstrap-password"); e != nil {
+		t.Fatal(e)
+	}
+	var superOrg sql.NullString
+	if e = db.QueryRow("SELECT role,organization_id FROM users WHERE email='platform@example.com'").Scan(&role, &superOrg); e != nil {
+		t.Fatal(e)
+	}
+	if role != "SUPER_ADMIN" || superOrg.Valid {
+		t.Fatalf("platform bootstrap role=%q organization valid=%v", role, superOrg.Valid)
+	}
+	if e = BootstrapSuperAdmin(db, "second-platform@example.com", "local-bootstrap-password"); e == nil {
+		t.Fatal("bootstrap allowed a second super administrator")
 	}
 }

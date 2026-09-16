@@ -27,11 +27,25 @@ void detect_board_hardware(void) {
             const char *m = json_object_get_string(obj, "mac_address");
             const char *mod = json_object_get_string(obj, "model");
             const char *fw = json_object_get_string(obj, "firmware_version");
+            JSON_Value *extra_ids = json_object_get_value(obj, "identifiers");
 
-            if (s && strlen(s) > 0) strncpy(g_cfg.serial, s, sizeof(g_cfg.serial) - 1);
-            if (m && strlen(m) > 0) strncpy(g_cfg.mac_address, m, sizeof(g_cfg.mac_address) - 1);
-            if (mod && strlen(mod) > 0) strncpy(g_cfg.model, mod, sizeof(g_cfg.model) - 1);
-            if (fw && strlen(fw) > 0) strncpy(g_cfg.firmware_version, fw, sizeof(g_cfg.firmware_version) - 1);
+            if (s && strlen(s) > 0)
+                strncpy(g_cfg.serial, s, sizeof(g_cfg.serial) - 1);
+            if (m && strlen(m) > 0)
+                strncpy(g_cfg.mac_address, m, sizeof(g_cfg.mac_address) - 1);
+            if (mod && strlen(mod) > 0)
+                strncpy(g_cfg.model, mod, sizeof(g_cfg.model) - 1);
+            if (fw && strlen(fw) > 0)
+                strncpy(g_cfg.firmware_version, fw, sizeof(g_cfg.firmware_version) - 1);
+            if (extra_ids && json_value_get_type(extra_ids) == JSONObject)
+            {
+                char *serialized = json_serialize_to_string(extra_ids);
+                if (serialized)
+                {
+                    snprintf(g_cfg.identifiers, sizeof(g_cfg.identifiers), "%s", serialized);
+                    json_free_serialized_string(serialized);
+                }
+            }
         }
         json_value_free(val);
     }
@@ -260,28 +274,114 @@ int rms_refresh_certificate(void){
     char url[512];snprintf(url,sizeof(url),"%s/api/v1/provision/renew",g_cfg.server_url);char *resp=rms_http(url,"{}",1,8192);if(!resp)return -1;
     JSON_Value *v=json_parse_string(resp);free(resp);int rc=install_certificate(json_object_get_string(json_value_get_object(v),"certificate"),g_cfg.device_id);json_value_free(v);return rc;
 }
-int perform_provision_checkin(void){
-    if(time(NULL)<1577836800){strcpy(rms_http_error,"clock_failure");return -1;}
-    if(!g_cfg.serial[0]||strlen(g_cfg.mac_address)!=17){strcpy(rms_http_error,"invalid_identity");return -1;}
-    if(generate_ec_p256_key_if_missing()!=0){strcpy(rms_http_error,"identity_key_failure");return -1;}
-    if(rms_id(g_cfg.device_id)&&g_cfg.mqtt_host[0])return rms_refresh_certificate();
-    char *csr=generate_csr_pem();if(!csr)return -1;
-    JSON_Value *v=json_value_init_object();JSON_Object *o=json_value_get_object(v);json_object_set_string(o,"csr",csr);
-    char *b=json_serialize_to_string(v);json_value_free(v);char url[256];snprintf(url,sizeof(url),"%s/api/v1/provision/bootstrap/challenge",g_cfg.server_url);
-    char *resp=rms_http(url,b,0,8192);free(b);if(!resp){free(csr);return -1;}
-    JSON_Value *challenge=json_parse_string(resp);free(resp);JSON_Object *co=json_value_get_object(challenge);
-    const char *id=json_object_get_string(co,"challenge_id"),*msg=json_object_get_string(co,"message");char prefix[96];snprintf(prefix,sizeof(prefix),"xnet-rms/bootstrap/v1:%s:",id?id:"");
-    if(!rms_id(id)||!msg||strncmp(msg,prefix,strlen(prefix))){free(csr);json_value_free(challenge);return -1;}
-    char *sig=sign_challenge_message(msg);if(!sig){free(csr);json_value_free(challenge);return -1;}
-    v=json_value_init_object();o=json_value_get_object(v);
-    json_object_set_string(o,"serial_number",g_cfg.serial);json_object_set_string(o,"lan_mac",g_cfg.mac_address);json_object_set_string(o,"model",g_cfg.model);json_object_set_string(o,"firmware_version",g_cfg.firmware_version);json_object_set_string(o,"agent_version",AGENT_VERSION);
-    json_object_set_string(o,"enrollment_token",g_cfg.enrollment_token);json_object_set_string(o,"csr",csr);json_object_set_string(o,"challenge_id",id);json_object_set_string(o,"signature",sig);
-    free(sig);free(csr);json_value_free(challenge);b=json_serialize_to_string(v);json_value_free(v);snprintf(url,sizeof(url),"%s/api/v1/provision/bootstrap/check-in",g_cfg.server_url);resp=rms_http(url,b,0,8192);free(b);if(!resp)return -1;
-    v=json_parse_string(resp);free(resp);o=json_value_get_object(v);const char *state=json_object_get_string(o,"registration_state");
-    if(state&&strcmp(state,"claimed")){snprintf(rms_http_error,sizeof(rms_http_error),"%s",state);json_value_free(v);return 1;}
-    id=json_object_get_string(o,"device_id");const char *cert=json_object_get_string(o,"certificate"),*host=json_object_get_string(o,"mqtt_host"),*org=json_object_get_string(o,"organization_name");int port=json_object_get_number(o,"mqtt_port");
-    int rc=-1;if(rms_id(id)&&host&&strlen(host)<sizeof(g_cfg.mqtt_host)&&port>0&&port<=65535&&install_certificate(cert,id)==0){char portstr[8];snprintf(portstr,sizeof(portstr),"%d",port);
-        if(save_provisioned_config(id,host,portstr,org?org:"")==0)rc=0;
+
+
+int perform_provision_checkin(void)
+{
+    if (time(NULL) < 1577836800)
+    {
+        strcpy(rms_http_error, "clock_failure");
+        return -1;
+    }
+    if (!g_cfg.serial[0])
+    {
+        strcpy(rms_http_error, "invalid_identity");
+        return -1;
+    }
+    if (generate_ec_p256_key_if_missing() != 0)
+    {
+        strcpy(rms_http_error, "identity_key_failure");
+        return -1;
+    }
+    if (rms_id(g_cfg.device_id) && g_cfg.mqtt_host[0])
+        return rms_refresh_certificate();
+    char *csr = generate_csr_pem();
+    if (!csr)
+        return -1;
+    JSON_Value *v = json_value_init_object();
+    JSON_Object *o = json_value_get_object(v);
+    json_object_set_string(o, "csr", csr);
+    char *b = json_serialize_to_string(v);
+    json_value_free(v);
+    char url[256];
+    snprintf(url, sizeof(url), "%s/api/v1/provision/bootstrap/challenge", g_cfg.server_url);
+    char *resp = rms_http(url, b, 0, 8192);
+    free(b);
+    if (!resp)
+    {
+        free(csr);
+        return -1;
+    }
+    JSON_Value *challenge = json_parse_string(resp);
+    free(resp);
+    JSON_Object *co = json_value_get_object(challenge);
+    const char *id = json_object_get_string(co, "challenge_id"), *msg = json_object_get_string(co, "message");
+    char prefix[96];
+    snprintf(prefix, sizeof(prefix), "xnet-rms/bootstrap/v1:%s:", id ? id : "");
+    if (!rms_id(id) || !msg || strncmp(msg, prefix, strlen(prefix)))
+    {
+        free(csr);
+        json_value_free(challenge);
+        return -1;
+    }
+    char *sig = sign_challenge_message(msg);
+    if (!sig)
+    {
+        free(csr);
+        json_value_free(challenge);
+        return -1;
+    }
+    v = json_value_init_object();
+    o = json_value_get_object(v);
+    json_object_set_string(o, "serial_number", g_cfg.serial);
+    json_object_set_string(o, "lan_mac", g_cfg.mac_address);
+    JSON_Value *ids = g_cfg.identifiers[0] ? json_parse_string(g_cfg.identifiers) : json_value_init_object();
+    if (!ids || json_value_get_type(ids) != JSONObject)
+    {
+        if (ids)
+            json_value_free(ids);
+        ids = json_value_init_object();
+    }
+    if (strlen(g_cfg.mac_address) == 17)
+        json_object_set_string(json_value_get_object(ids), "mac", g_cfg.mac_address);
+    json_object_set_value(o, "identifiers", ids);
+    json_object_set_string(o, "model", g_cfg.model);
+    json_object_set_string(o, "firmware_version", g_cfg.firmware_version);
+    json_object_set_string(o, "agent_version", AGENT_VERSION);
+    json_object_set_string(o, "enrollment_token", g_cfg.enrollment_token);
+    json_object_set_string(o, "csr", csr);
+    json_object_set_string(o, "challenge_id", id);
+    json_object_set_string(o, "signature", sig);
+    free(sig);
+    free(csr);
+    json_value_free(challenge);
+    b = json_serialize_to_string(v);
+    json_value_free(v);
+    snprintf(url, sizeof(url), "%s/api/v1/provision/bootstrap/check-in", g_cfg.server_url);
+    resp = rms_http(url, b, 0, 8192);
+    free(b);
+    if (!resp)
+        return -1;
+    v = json_parse_string(resp);
+    free(resp);
+    o = json_value_get_object(v);
+    const char *state = json_object_get_string(o, "registration_state");
+    if (state && strcmp(state, "claimed"))
+    {
+        snprintf(rms_http_error, sizeof(rms_http_error), "%s", state);
+        json_value_free(v);
+        return 1;
+    }
+    id = json_object_get_string(o, "device_id");
+    const char *cert = json_object_get_string(o, "certificate"), *host = json_object_get_string(o, "mqtt_host"), *org = json_object_get_string(o, "organization_name");
+    int port = json_object_get_number(o, "mqtt_port");
+    int rc = -1;
+    if (rms_id(id) && host && strlen(host) < sizeof(g_cfg.mqtt_host) && port > 0 && port <= 65535 && install_certificate(cert, id) == 0)
+    {
+        char portstr[8];
+        snprintf(portstr, sizeof(portstr), "%d", port);
+        if (save_provisioned_config(id, host, portstr, org ? org : "") == 0)
+            rc = 0;
     }
     json_value_free(v);return rc;
 }

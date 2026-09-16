@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Copy, KeyRound, Search, ShieldCheck, UserPlus, Users } from "lucide-react";
+import { Building2, Copy, KeyRound, Pencil, Search, ShieldCheck, UserCheck, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, formatApiError } from "../api";
@@ -57,10 +57,12 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
   const [tokenOpen, setTokenOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [disableTarget, setDisableTarget] = useState<User | null>(null);
+  const [editTarget, setEditTarget] = useState<User | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<EnrollmentToken | null>(null);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [userForm, setUserForm] = useState({ email: "", password: "", role: "OPERATOR" as User["role"] });
+  const [editForm, setEditForm] = useState({ email: "", password: "", role: "OPERATOR" as Exclude<User["role"], "SUPER_ADMIN">, organization_id: "" });
   const [tokenForm, setTokenForm] = useState({ name: "", maxUses: 1 });
   const [customerName, setCustomerName] = useState("");
 
@@ -71,10 +73,8 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
   const loadScopedData = async () => {
     const suffix = scope ? `?organization_id=${encodeURIComponent(scope)}` : "";
     try {
-      const [nextUsers, nextTokens] = await Promise.all([
-        api<User[]>(`users${suffix}`),
-        api<EnrollmentToken[]>(`enrollment-tokens${suffix}`),
-      ]);
+      const nextUsers = await api<User[]>(`users${suffix}`);
+      const nextTokens = isSuperAdmin ? await api<EnrollmentToken[]>(`enrollment-tokens${suffix}`) : [];
       setUsers(nextUsers || []);
       setTokens(nextTokens || []);
       if (isSuperAdmin) {
@@ -86,9 +86,9 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
     }
   };
 
-  useEffect(() => { void loadScopedData(); }, [scope]);
+  useEffect(() => { if (!isSuperAdmin && activeTab === "tokens") setActiveTab("accounts"); void loadScopedData(); }, [scope, isSuperAdmin]);
 
-  const customerNameFor = (organizationId: string) => customerList.find((organization) => organization.id === organizationId)?.name || organizationId || "Platform";
+  const customerNameFor = (organizationId: string | null) => customerList.find((organization) => organization.id === organizationId)?.name || organizationId || "Platform";
   const filteredUsers = useMemo(() => users.filter((user) => {
     const matchesQuery = !query.trim() || user.email.toLowerCase().includes(query.trim().toLowerCase());
     const matchesRole = roleFilter === "all" || user.role === roleFilter;
@@ -99,6 +99,49 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
 
   const resetUserForm = () => setUserForm({ email: "", password: "", role: "OPERATOR" });
   const resetTokenForm = () => setTokenForm({ name: "", maxUses: 1 });
+
+  const openEditUser = (user: User) => {
+    if (user.role === "SUPER_ADMIN") return;
+    setEditTarget(user);
+    setEditForm({ email: user.email, password: "", role: user.role, organization_id: user.organization_id || "" });
+  };
+
+  const saveUser = async () => {
+    if (!editTarget || !editForm.email.trim()) {
+      toast.warning("Email address is required.");
+      return;
+    }
+    if (editForm.password && (editForm.password.length < 12 || editForm.password.length > 72)) {
+      toast.warning("Password must be between 12 and 72 characters.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const value: Record<string, unknown> = { email: editForm.email.trim(), role: editForm.role };
+      if (editForm.password) value.password = editForm.password;
+      if (isSuperAdmin) value.organization_id = editForm.organization_id || null;
+      await api(`users/${editTarget.id}`, "PATCH", value);
+      toast.success("User account updated");
+      setEditTarget(null);
+      await loadScopedData();
+      onRefresh();
+    } catch (err) {
+      toast.error(formatApiError(err).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const enableUser = async (user: User) => {
+    try {
+      await api(`users/${user.id}/enable`, "POST", {});
+      toast.success("User enabled");
+      await loadScopedData();
+      onRefresh();
+    } catch (err) {
+      toast.error(formatApiError(err).message);
+    }
+  };
 
   const createUser = async () => {
     if (!userForm.email.trim() || userForm.password.length < 12 || userForm.password.length > 72) {
@@ -216,7 +259,7 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
         <TabsList>
           <TabsTrigger value="accounts"><Users className="size-3.5" />Accounts</TabsTrigger>
-          <TabsTrigger value="tokens"><KeyRound className="size-3.5" />Enrollment tokens</TabsTrigger>
+          {isSuperAdmin && <TabsTrigger value="tokens"><KeyRound className="size-3.5" />Enrollment tokens</TabsTrigger>}
           {isSuperAdmin && <TabsTrigger value="customers"><Building2 className="size-3.5" />Customers</TabsTrigger>}
         </TabsList>
 
@@ -245,7 +288,7 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
                         <TableCell><div className="font-medium capitalize">{formatRole(user.role).toLowerCase()}</div><div className="font-mono text-[10px] text-muted-foreground">{user.role}</div></TableCell>
                         <TableCell className="text-[12px]">{customerNameFor(user.organization_id)}</TableCell>
                         <TableCell><Badge variant={user.disabled ? "secondary" : "ok"}>{user.disabled ? "Disabled" : "Active"}</Badge></TableCell>
-                        <TableCell className="text-right"><Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={!!user.disabled || user.id === currentUser.id} onClick={() => setDisableTarget(user)}>Disable</Button></TableCell>
+                        <TableCell className="text-right"><div className="flex justify-end gap-1.5">{user.role !== "SUPER_ADMIN" && <Button variant="outline" size="sm" onClick={() => openEditUser(user)}><Pencil className="size-3.5" />Edit</Button>}{user.disabled ? <Button variant="outline" size="sm" onClick={() => void enableUser(user)}><UserCheck className="size-3.5" />Enable</Button> : <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={user.id === currentUser.id || user.role === "SUPER_ADMIN"} onClick={() => setDisableTarget(user)}>Disable</Button>}</div></TableCell>
                       </TableRow>
                     ))}
                     {!filteredUsers.length && <TableRow><TableCell colSpan={5} className="h-28 text-center text-xs text-muted-foreground">{loading ? "Loading accounts…" : "No accounts match this scope and filter."}</TableCell></TableRow>}
@@ -270,7 +313,7 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
           </Card>
         </TabsContent>
 
-        <TabsContent value="tokens" className="mt-4">
+        {isSuperAdmin && <TabsContent value="tokens" className="mt-4">
           <Card>
             <CardHeader className="border-b border-border pb-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle>Enrollment tokens</CardTitle><CardDescription>One-time credentials for router auto-enrollment. The token value is shown only after creation.</CardDescription></div><Button size="sm" onClick={() => { setCreatedToken(null); setTokenOpen(true); }}><KeyRound className="size-4" />Generate token</Button></div></CardHeader>
             <CardContent className="p-0"><div className="border-b border-border p-4">{isSuperAdmin && <ScopeSelect value={scope} organizations={customerList} onChange={setScope} />}</div><div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Name / purpose</TableHead><TableHead>Uses</TableHead><TableHead>Customer</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader><TableBody>
@@ -278,17 +321,19 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
               {!tokens.length && <TableRow><TableCell colSpan={5} className="h-28 text-center text-xs text-muted-foreground">{loading ? "Loading tokens…" : "No enrollment tokens in this scope."}</TableCell></TableRow>}
             </TableBody></Table></div></CardContent>
           </Card>
-        </TabsContent>
+        </TabsContent>}
 
         {isSuperAdmin && <TabsContent value="customers" className="mt-4"><Card><CardHeader className="border-b border-border pb-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle>Customers</CardTitle><CardDescription>Tenant boundaries for users, devices, templates, and telemetry.</CardDescription></div><Button size="sm" onClick={() => setCustomerOpen(true)}><Building2 className="size-4" />Create customer</Button></div></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Customer</TableHead><TableHead>Organization ID</TableHead><TableHead className="text-right">Scope</TableHead></TableRow></TableHeader><TableBody>{customerList.map((organization) => <TableRow key={organization.id}><TableCell className="font-medium">{organization.name}</TableCell><TableCell className="font-mono text-[10.5px] text-muted-foreground">{organization.id}</TableCell><TableCell className="text-right"><Button variant="outline" size="sm" onClick={() => { setScope(organization.id); setActiveTab("accounts"); }}>Open scope</Button></TableCell></TableRow>)}{!customerList.length && <TableRow><TableCell colSpan={3} className="h-28 text-center text-xs text-muted-foreground">No customer organizations.</TableCell></TableRow>}</TableBody></Table></CardContent></Card></TabsContent>}
       </Tabs>
 
       <Dialog open={userOpen} onOpenChange={setUserOpen}><DialogContent><DialogHeader><DialogTitle>Add user account</DialogTitle><DialogDescription>Passwords must be between 12 and 72 characters. Choose the least-privileged role that fits the job.</DialogDescription></DialogHeader><div className="space-y-4"><div>{isSuperAdmin && <ScopeSelect value={scope} organizations={customerList} onChange={setScope} />}</div><div><label htmlFor="new-user-email" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Email address</label><Input id="new-user-email" type="email" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} placeholder="operator@customer.com" /></div><div><label htmlFor="new-user-password" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Initial password</label><Input id="new-user-password" type="password" value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} placeholder="12–72 characters" /></div><div><div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Role</div><div className="grid gap-2 sm:grid-cols-3">{roleOptions.map((option) => <button type="button" key={option.value} aria-pressed={userForm.role === option.value} onClick={() => setUserForm({ ...userForm, role: option.value })} className={`rounded-lg border p-3 text-left transition-colors ${userForm.role === option.value ? "border-primary bg-accent" : "border-border hover:bg-secondary/60"}`}><span className="block text-[12px] font-semibold">{option.label}</span><span className="mt-1 block text-[11px] text-muted-foreground">{option.description}</span></button>)}</div></div></div><DialogFooter><Button variant="outline" onClick={() => setUserOpen(false)} disabled={saving}>Cancel</Button><Button onClick={createUser} disabled={saving}>{saving ? "Creating…" : "Create user"}</Button></DialogFooter></DialogContent></Dialog>
 
+      <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}><DialogContent><DialogHeader><DialogTitle>Edit user account</DialogTitle><DialogDescription>Update credentials, role, or customer assignment. Leave password blank to keep it unchanged.</DialogDescription></DialogHeader><div className="space-y-4"><div><label htmlFor="edit-user-email" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Email address</label><Input id="edit-user-email" type="email" value={editForm.email} onChange={(event) => setEditForm({ ...editForm, email: event.target.value })} /></div><div><label htmlFor="edit-user-password" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">New password</label><Input id="edit-user-password" type="password" value={editForm.password} onChange={(event) => setEditForm({ ...editForm, password: event.target.value })} placeholder="Leave blank to keep current password" /></div><div><label htmlFor="edit-user-role" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Role</label><select id="edit-user-role" className={`${selectClass} w-full`} value={editForm.role} onChange={(event) => setEditForm({ ...editForm, role: event.target.value as typeof editForm.role })}>{roleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>{isSuperAdmin && <ScopeSelect value={editForm.organization_id} organizations={customerList} onChange={(value) => setEditForm({ ...editForm, organization_id: value })} />}</div><DialogFooter><Button variant="outline" onClick={() => setEditTarget(null)} disabled={saving}>Cancel</Button><Button onClick={() => void saveUser()} disabled={saving}>{saving ? "Saving…" : "Save changes"}</Button></DialogFooter></DialogContent></Dialog>
+
       <Dialog open={tokenOpen} onOpenChange={(open) => { setTokenOpen(open); if (!open) setCreatedToken(null); }}><DialogContent>{createdToken ? <><DialogHeader><DialogTitle>Copy enrollment token</DialogTitle><DialogDescription>This secret is returned once. Store it securely before closing.</DialogDescription></DialogHeader><div className="rounded-lg border border-warn-border bg-warn-bg p-4"><div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-warn"><KeyRound className="size-4" />Token value</div><code className="block break-all font-mono text-[11px] text-warn">{createdToken}</code></div><DialogFooter><Button variant="outline" onClick={() => { void navigator.clipboard?.writeText(createdToken); toast.success("Token copied"); }}><Copy className="size-4" />Copy</Button><Button onClick={() => { setTokenOpen(false); setCreatedToken(null); }}>Done</Button></DialogFooter></> : <><DialogHeader><DialogTitle>Generate enrollment token</DialogTitle><DialogDescription>Use a clear purpose so operators know which router batch the credential belongs to.</DialogDescription></DialogHeader><div className="space-y-4">{isSuperAdmin && <ScopeSelect value={scope} organizations={customerList} onChange={setScope} />}<div><label htmlFor="token-name" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Token name</label><Input id="token-name" value={tokenForm.name} onChange={(event) => setTokenForm({ ...tokenForm, name: event.target.value })} placeholder="Warehouse batch" /></div><div><label htmlFor="token-uses" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Maximum uses</label><Input id="token-uses" type="number" min={1} max={10000} value={tokenForm.maxUses} onChange={(event) => setTokenForm({ ...tokenForm, maxUses: Number(event.target.value) })} /></div></div><DialogFooter><Button variant="outline" onClick={() => setTokenOpen(false)} disabled={saving}>Cancel</Button><Button onClick={createToken} disabled={saving}>{saving ? "Generating…" : "Generate token"}</Button></DialogFooter></>}</DialogContent></Dialog>
 
       <Dialog open={customerOpen} onOpenChange={setCustomerOpen}><DialogContent><DialogHeader><DialogTitle>Create customer</DialogTitle><DialogDescription>New users, devices, and telemetry will be isolated to this organization.</DialogDescription></DialogHeader><Input aria-label="Customer name" value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Acme network" /><DialogFooter><Button variant="outline" onClick={() => setCustomerOpen(false)} disabled={saving}>Cancel</Button><Button onClick={createCustomer} disabled={saving}>{saving ? "Creating…" : "Create customer"}</Button></DialogFooter></DialogContent></Dialog>
-      <ConfirmDialog open={!!disableTarget} onOpenChange={(open) => !open && setDisableTarget(null)} title="Disable user account?" description="This user will be logged out and cannot access RMS. The current API does not provide a re-enable action." confirmLabel="Disable account" onConfirm={disableUser} />
+      <ConfirmDialog open={!!disableTarget} onOpenChange={(open) => !open && setDisableTarget(null)} title="Disable user account?" description="This user will be logged out and cannot access RMS until an administrator enables the account again." confirmLabel="Disable account" onConfirm={disableUser} />
       <ConfirmDialog open={!!revokeTarget} onOpenChange={(open) => !open && setRevokeTarget(null)} title="Revoke enrollment token?" description="Routers that have not used this credential will no longer be able to enroll with it." confirmLabel="Revoke token" onConfirm={revokeToken} />
     </div>
   );

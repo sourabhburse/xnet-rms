@@ -87,3 +87,36 @@ func BootstrapOrgAdmin(d *sql.DB, email, password, organization string) error {
 	}
 	return tx.Commit()
 }
+
+// BootstrapSuperAdmin creates the single platform bootstrap account. Unlike
+// BootstrapOrgAdmin this intentionally works on an existing installation, but
+// it refuses to create a second active platform administrator.
+func BootstrapSuperAdmin(d *sql.DB, email, password string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if len(password) < 12 || len(password) > 72 || !strings.Contains(email, "@") {
+		return errors.New("admin email and password of 12–72 bytes required")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec("SELECT pg_advisory_xact_lock(781332)"); err != nil {
+		return err
+	}
+	var present bool
+	if err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE role='SUPER_ADMIN' AND NOT disabled)").Scan(&present); err != nil {
+		return err
+	}
+	if present {
+		return errors.New("an active SUPER_ADMIN already exists")
+	}
+	if _, err = tx.Exec("INSERT INTO users(id,organization_id,email,password_hash,role) VALUES($1,NULL,$2,$3,'SUPER_ADMIN')", randomID(), email, string(hash)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

@@ -37,6 +37,7 @@ typedef struct {
     char serial[64];
     char device_id[64];
     char mac_address[32];
+    char identifiers[1024];
     char model[64];
     char architecture[32];
     char firmware_version[64];

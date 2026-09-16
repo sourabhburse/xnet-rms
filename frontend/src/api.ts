@@ -80,7 +80,7 @@ export function formatApiError(err: unknown): { title: string; message: string; 
       if (code === 'identity_conflict' || msg.includes('conflict')) {
         return {
           title: 'Conflict Detected',
-          message: 'A device, registration, or tag with this identity or LAN MAC already exists.',
+          message: 'A device or registration with this identity already exists.',
           type: 'error',
         };
       }

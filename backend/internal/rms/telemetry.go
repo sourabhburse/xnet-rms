@@ -44,14 +44,35 @@ func assignDefaultTelemetry(tx *sql.Tx, deviceID string) error {
 	if e != nil {
 		return e
 	}
-	if _, e = tx.Exec("INSERT INTO profiles(id,version,name,definition,organization_id) VALUES($1,$2,$3,$4,NULL) ON CONFLICT(id,version) DO NOTHING", p.ID, p.Version, p.Name, string(raw(p))); e != nil {
+	profileID, profileVersion := p.ID, p.Version
+	var productID sql.NullString
+	var productRevision sql.NullInt64
+	if e = tx.QueryRow("SELECT product_id,product_revision FROM devices WHERE id=$1", deviceID).Scan(&productID, &productRevision); e != nil {
 		return e
 	}
-	_, e = tx.Exec(`INSERT INTO assignments(device_id,profile_id,version,active)
-SELECT $1,p.id,p.version,true FROM profiles p
-WHERE p.id=$2 AND p.version=1
-ON CONFLICT(device_id,profile_id,version) DO UPDATE SET active=true`, deviceID, DeviceOverviewProfileID)
-	return e
+	if productID.Valid && productRevision.Valid {
+		var configuredID sql.NullString
+		var configuredVersion sql.NullInt64
+		e = tx.QueryRow(`SELECT default_profile_id,default_profile_version FROM product_revisions
+            WHERE product_id=$1 AND version=$2`, productID.String, productRevision.Int64).Scan(&configuredID, &configuredVersion)
+		if e != nil && e != sql.ErrNoRows {
+			return e
+		}
+		if e == nil && configuredID.Valid && configuredVersion.Valid {
+			profileID, profileVersion = configuredID.String, int(configuredVersion.Int64)
+		}
+	}
+	if profileID == p.ID {
+		if _, e = tx.Exec("INSERT INTO profiles(id,version,name,definition,organization_id) VALUES($1,$2,$3,$4,NULL) ON CONFLICT(id,version) DO NOTHING", p.ID, p.Version, p.Name, string(raw(p))); e != nil {
+			return e
+		}
+	}
+	if _, e = tx.Exec(`INSERT INTO assignments(device_id,profile_id,version,active)
+SELECT $1,id,version,true FROM profiles WHERE id=$2 AND version=$3
+ON CONFLICT(device_id,profile_id,version) DO UPDATE SET active=true`, deviceID, profileID, profileVersion); e != nil {
+		return e
+	}
+	return nil
 }
 
 type Field struct {

@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import MonitoringTemplates from "./MonitoringTemplates";
 import UsersAccessView from "./UsersAccessView";
 import AuditRecordsView from "./AuditRecordsView";
+import ProductsView from "./ProductsView";
 
 interface AdminViewsProps { view: string; currentUser: User; data: any[]; organizations: Organization[]; groups: DeviceGroup[]; tags: TagItem[]; selectedOrg: string; loading: boolean; onRefresh: () => void; }
 const selectClass = "h-9 w-full rounded-md border border-input bg-card px-3 text-[12px] text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/25";
@@ -70,6 +71,8 @@ export default function AdminViews({ view, currentUser, data, organizations, gro
   const scopeSelect = isSuperAdmin && <select aria-label="Customer organization" value={targetOrg} onChange={(event) => setTargetOrg(event.target.value)} className={selectClass}><option value="">Select organization</option>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select>;
 
   if (view === "profiles") return <MonitoringTemplates currentUser={currentUser} data={data as MonitoringTemplate[]} organizations={organizations} groups={groups} tags={tags} selectedOrg={selectedOrg} loading={loading} onRefresh={onRefresh} />;
+
+  if (view === "products") return <ProductsView currentUser={currentUser} onRefresh={onRefresh} />;
 
   if (view === "users" || view === "enrollment-tokens" || view === "organizations") {
     return <UsersAccessView initialTab={view === "enrollment-tokens" ? "tokens" : view === "organizations" ? "customers" : "accounts"} currentUser={currentUser} data={data as User[]} organizations={organizations} selectedOrg={selectedOrg} loading={loading} onRefresh={onRefresh} />;

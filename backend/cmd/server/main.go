@@ -34,7 +34,7 @@ func serveApplication(files http.Handler, ui fs.FS, w http.ResponseWriter, r *ht
 }
 
 func main() {
-	mode := flag.String("mode", "core", "core, tunnel, migrate, init-ca, admin")
+	mode := flag.String("mode", "core", "core, tunnel, migrate, init-ca, admin, super-admin")
 	hosts := flag.String("hosts", "", "comma-separated certificate DNS names/IPs, including tunnel wildcard")
 	flag.Parse()
 	c, e := rms.FromEnv()
@@ -50,7 +50,7 @@ func main() {
 		}
 		return
 	}
-	if *mode == "migrate" || *mode == "admin" {
+	if *mode == "migrate" || *mode == "admin" || *mode == "super-admin" {
 		d, e := rms.OpenDB(c.DatabaseURL)
 		if e != nil {
 			log.Fatal(e)
@@ -58,8 +58,10 @@ func main() {
 		defer d.Close()
 		if *mode == "migrate" {
 			e = rms.Migrate(d)
-		} else {
+		} else if *mode == "admin" {
 			e = rms.BootstrapOrgAdmin(d, os.Getenv("RMS_ADMIN_EMAIL"), os.Getenv("RMS_ADMIN_PASSWORD"), os.Getenv("RMS_ADMIN_ORG_NAME"))
+		} else {
+			e = rms.BootstrapSuperAdmin(d, os.Getenv("RMS_SUPER_ADMIN_EMAIL"), os.Getenv("RMS_SUPER_ADMIN_PASSWORD"))
 		}
 		if e != nil {
 			log.Fatal(e)

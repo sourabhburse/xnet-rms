@@ -124,7 +124,7 @@ export default function App() {
         if (u && typeof u === 'object' && u.id && u.role) {
           setUser(u);
           if (u.role !== 'SUPER_ADMIN') {
-            setSelectedOrg(u.organization_id);
+            setSelectedOrg(u.organization_id || '');
           }
         } else {
           setUser(null);
@@ -202,7 +202,7 @@ export default function App() {
           setSelectedDevice(matched || null);
           if (!matched) setGlobalError('The requested device was not found.');
         }
-      } else if (['users', 'enrollment-tokens', 'audit-logs', 'organizations', 'profiles', 'bundles'].includes(view)) {
+      } else if (['users', 'enrollment-tokens', 'audit-logs', 'organizations', 'profiles', 'products', 'bundles'].includes(view)) {
         const suffix = selectedOrg && ['users', 'enrollment-tokens', 'audit-logs'].includes(view)
           ? `?organization_id=${encodeURIComponent(selectedOrg)}`
           : '';
@@ -324,6 +324,7 @@ export default function App() {
     profiles: 'Monitoring templates',
     'audit-logs': 'Audit records',
     organizations: 'Customers',
+    products: 'Products',
     bundles: 'Collector bundles',
   };
 
@@ -382,6 +383,7 @@ export default function App() {
           <div className="min-h-full">
             {detailDevice ? (
               <DeviceDetail
+                key={detailDevice.id}
                 device={detailDevice}
                 user={user}
                 onBack={() => goToView('devices')}
@@ -494,7 +496,7 @@ export default function App() {
             {view === 'alerts' && (
               <AlertsView user={user} selectedOrg={selectedOrg} onUnreadChange={setAlertUnread} />
             )}
-            {['users', 'enrollment-tokens', 'organizations', 'profiles', 'bundles', 'audit-logs'].includes(view) && (
+            {['users', 'enrollment-tokens', 'organizations', 'profiles', 'products', 'bundles', 'audit-logs'].includes(view) && (
               <AdminViews
                 view={view}
                 currentUser={user}

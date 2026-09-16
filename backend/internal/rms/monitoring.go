@@ -275,7 +275,27 @@ func validateTemplateDefinition(def *monitoringTemplateDefinition) error {
 
 func (s *Core) monitoringCatalog(w http.ResponseWriter, r *http.Request) {
 	categories := []string{"Availability", "System", "Cellular", "WAN", "Ethernet and Wi-Fi", "VPN and failover", "Services", "Industrial"}
-	output(w, 200, map[string]any{"version": monitoringCatalogVersion, "categories": categories, "metrics": monitoringMetricCatalog})
+	productID := r.URL.Query().Get("product_id")
+	allowed := map[string]bool{}
+	if productID != "" {
+		var capabilities []byte
+		if err := s.DB.QueryRow("SELECT capabilities FROM products WHERE id=$1 AND NOT archived", productID).Scan(&capabilities); err == nil {
+			var values []string
+			if json.Unmarshal(capabilities, &values) == nil {
+				for _, value := range values {
+					allowed[value] = true
+				}
+			}
+		}
+	}
+	metrics := make([]catalogMetric, 0, len(monitoringMetricCatalog))
+	for _, metric := range monitoringMetricCatalog {
+		if metric.RequiredCapability != "" && productID != "" && !allowed[metric.RequiredCapability] {
+			continue
+		}
+		metrics = append(metrics, metric)
+	}
+	output(w, 200, map[string]any{"version": monitoringCatalogVersion, "categories": categories, "metrics": metrics})
 }
 
 func templateOrg(a Actor, requested string) (string, bool) {
@@ -682,8 +702,13 @@ func reconcileDeviceTx(tx *sql.Tx, deviceID, org string) error {
 		old = append(old, x)
 	}
 	rows.Close()
+	// Soft-deactivate rather than hard-delete, the same way the
+	// device_overview baseline profile is handled below: Ingest's assignment
+	// JOIN doesn't filter on active, so a snapshot the device already had
+	// queued for a source that was just removed from the template can still
+	// be accepted and acknowledged instead of permanently failing to match.
 	for _, x := range old {
-		if _, err = tx.Exec("DELETE FROM assignments WHERE device_id=$1 AND profile_id=$2 AND version=$3", deviceID, x.id, x.version); err != nil {
+		if _, err = tx.Exec("UPDATE assignments SET active=false WHERE device_id=$1 AND profile_id=$2 AND version=$3", deviceID, x.id, x.version); err != nil {
 			return err
 		}
 	}
@@ -880,6 +905,27 @@ type monitoringPreviewJob struct {
 	Samples   map[string]monitoringPreviewSample
 }
 
+// sweepPreviews removes preview jobs nobody polled to completion, using the
+// same 10-minute expiry monitoringPreviewStatus already applies lazily - a
+// job whose status endpoint is never called again would otherwise stay in
+// s.previews forever.
+func (s *Core) sweepPreviews() {
+	s.previews.Range(func(key, value any) bool {
+		job, ok := value.(*monitoringPreviewJob)
+		if !ok {
+			s.previews.Delete(key)
+			return true
+		}
+		job.Mu.Lock()
+		expired := time.Since(job.Result.CreatedAt) > 10*time.Minute
+		job.Mu.Unlock()
+		if expired {
+			s.previews.Delete(key)
+		}
+		return true
+	})
+}
+
 func (job *monitoringPreviewJob) rebuild() {
 	items := make([]map[string]any, 0, len(job.MetricIDs))
 	for _, id := range job.MetricIDs {
@@ -961,6 +1007,12 @@ func (s *Core) monitoringPreviewStatus(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "preview not found")
 		return
 	}
+	// Ownership must be checked before any read/mutation of job state below,
+	// so a request for another org's preview ID can't observe or affect it.
+	if !s.scopedDevice(r, job.Result.DeviceID) {
+		fail(w, 404, "preview not found")
+		return
+	}
 	job.Mu.Lock()
 	defer job.Mu.Unlock()
 	if time.Since(job.Result.CreatedAt) > 10*time.Minute {
@@ -971,10 +1023,6 @@ func (s *Core) monitoringPreviewStatus(w http.ResponseWriter, r *http.Request) {
 	if job.Result.Status == "pending" && time.Since(job.Result.CreatedAt) > 60*time.Second {
 		job.Result.Status = "failed"
 		job.rebuild()
-	}
-	if !s.scopedDevice(r, job.Result.DeviceID) {
-		fail(w, 404, "preview not found")
-		return
 	}
 	output(w, 200, job.Result)
 }

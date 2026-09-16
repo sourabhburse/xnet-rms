@@ -11,6 +11,7 @@ import {
   TerminalSquare,
   FileBarChart,
   BellRing,
+  Boxes,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -107,6 +108,7 @@ export function AppSidebar({
     ];
     if (isSuperAdmin) {
       admin.push(
+        { key: "products", label: "Products", icon: Boxes },
         { key: "bundles", label: "Collector bundles", icon: TerminalSquare }
       );
     }

@@ -22,17 +22,20 @@ It creates only:
 - `/opt/xnet-rms`, `/etc/xnet-rms`, `/var/lib/xnet-rms`.
 - Three named RMS systemd services and an RMS certificate renewal timer.
 - Private installation CA and collector signing material generated on the VPS.
-- One customer organization and one `ORG_ADMIN` account; no sample routers,
-  tokens, telemetry, profiles, alerts or demo users.
-- Initial organization administrator credentials in
-  `~ubuntu/.config/xnet-rms/initial-login.txt`.
+- One customer organization, one `ORG_ADMIN` account, and one `SUPER_ADMIN`
+  account; no sample routers, tokens, telemetry, profiles, alerts or demo users.
+- Initial organization and platform administrator credentials in
+  `~ubuntu/.config/xnet-rms/initial-login.txt` and
+  `~ubuntu/.config/xnet-rms/initial-super-admin-login.txt`.
 - Router public trust files in `~ubuntu/xnet-rms-router-trust`.
 
 The database migrations create schema and migration metadata only. The
 bootstrap step refuses to run against a database that already contains
-application data, and it never creates a `SUPER_ADMIN` account. The
-organization name and administrator email can be supplied through
-`RMS_ADMIN_ORG_NAME` and `RMS_ADMIN_EMAIL` before running the installer.
+application data. The organization name and administrator email can be supplied
+through `RMS_ADMIN_ORG_NAME` and `RMS_ADMIN_EMAIL` before running the installer.
+The platform administrator email can be supplied through
+`RMS_SUPER_ADMIN_EMAIL`. The installer generates both passwords locally and
+does not print them.
 
 | Service | Endpoint |
 |---|---|
@@ -57,7 +60,7 @@ curl --fail https://xnet-rms-test.duckdns.org:8445/health
 curl --fail https://xnet-rms-test.duckdns.org:9443/health
 ```
 
-View the generated administrator login locally on the VPS. Do not post its
+View the generated administrator logins locally on the VPS. Do not post their
 password or installation private keys in logs or chat. The next functional step
 is enrollment of one XE33 2S, followed by profile/telemetry and remote-session tests.
 

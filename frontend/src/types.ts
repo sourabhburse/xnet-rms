@@ -2,10 +2,32 @@ export type Role = 'SUPER_ADMIN' | 'ORG_ADMIN' | 'OPERATOR' | 'VIEWER';
 
 export interface User {
   id: string;
-  organization_id: string;
+  organization_id: string | null;
   email: string;
   role: Role;
   disabled?: boolean;
+}
+
+export interface IdentityRule {
+  kind: string;
+  label: string;
+  required: boolean;
+  normalize: 'mac' | 'imei' | 'upper' | 'raw';
+  unique: boolean;
+}
+
+export interface Product {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  identity_schema: IdentityRule[];
+  model_patterns: string[];
+  capabilities: string[];
+  current_revision: number;
+  default_profile_id?: string | null;
+  default_profile_version?: number | null;
+  archived: boolean;
 }
 
 export interface Organization {
@@ -39,7 +61,10 @@ export interface Device {
   id: string;
   organization_id: string;
   name: string;
-  lan_mac: string;
+  identifiers: Record<string, string>;
+  product_id: string | null;
+  /** @deprecated returned only by older cores during rollout */
+  lan_mac?: string;
   tags: string[];
   groups?: string[];
   serial_number: string;
@@ -57,7 +82,10 @@ export interface Registration {
   id: string;
   organization_id: string;
   serial_number: string;
-  lan_mac: string;
+  identifiers: Record<string, string>;
+  product_id: string | null;
+  /** @deprecated returned only by older cores during rollout */
+  lan_mac?: string;
   name: string;
   tags: string[];
   device_id: string | null;
@@ -70,7 +98,10 @@ export interface PendingDevice {
   id: string;
   organization_id: string;
   serial_number: string;
-  lan_mac: string;
+  identifiers: Record<string, string>;
+  product_id: string | null;
+  /** @deprecated returned only by older cores during rollout */
+  lan_mac?: string;
   model: string;
   last_seen: string;
 }
