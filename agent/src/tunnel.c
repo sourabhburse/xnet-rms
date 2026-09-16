@@ -47,8 +47,12 @@ int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
         return -1;
     }
 
-    /* mount(2) requires the bind target to exist. Password-only Dropbear
-     * images may not have authorized_keys until an operator creates it. */
+    /* mount(2) requires the bind target to exist. Dropbear does not create
+     * authorized_keys on images that use password-only login, which used to
+     * make every SSH_LUCI/TERMINAL_SSH command fail before the worker could
+     * even reach the gateway. Remember whether the target exists, then create
+     * only an empty temporary target immediately before the bind; this keeps
+     * all earlier failure paths free of filesystem leftovers. */
     struct stat target;
     int target_exists = 1;
     if (lstat(DROPBEAR_AUTH_KEYS, &target) != 0) {
@@ -67,7 +71,10 @@ int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
     char tmp[256];
     snprintf(tmp, sizeof(tmp), "%s/authorized_keys.tmp", RMS_SSH_RAM_DIR);
     int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (fd < 0) return -1;
+    if (fd < 0) {
+        syslog(LOG_ERR, "niseva tunnel: cannot open temporary authorized_keys: %s", strerror(errno));
+        return -1;
+    }
 
     // Preserve existing permanent authorized_keys if present
     int orig_fd = target_exists ? open(DROPBEAR_AUTH_KEYS, O_RDONLY) : -1;
@@ -76,6 +83,7 @@ int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
         ssize_t n;
         while ((n = read(orig_fd, buf, sizeof(buf))) > 0) {
             if (write_all(fd, buf, (size_t)n) != 0) {
+                syslog(LOG_ERR, "niseva tunnel: cannot copy permanent authorized_keys: %s", strerror(errno));
                 close(orig_fd);
                 close(fd);
                 unlink(tmp);
@@ -84,6 +92,7 @@ int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
         }
         close(orig_fd);
         if (n < 0 || write_all(fd, "\n", 1) != 0) {
+            syslog(LOG_ERR, "niseva tunnel: cannot finish permanent authorized_keys copy: %s", strerror(errno));
             close(fd);
             unlink(tmp);
             return -1;
@@ -92,6 +101,7 @@ int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
 
     size_t len = strlen(pubkey);
     if (write_all(fd, pubkey, len) != 0 || write_all(fd, "\n", 1) != 0) {
+        syslog(LOG_ERR, "niseva tunnel: cannot write session authorized_keys: %s", strerror(errno));
         close(fd);
         unlink(tmp);
         return -1;
@@ -99,6 +109,7 @@ int rms_ssh_inject_key(const char *session_id, const char *pubkey) {
     fsync(fd);
     close(fd);
     if (rename(tmp, RMS_SSH_RAM_KEYS) != 0) {
+        syslog(LOG_ERR, "niseva tunnel: cannot publish temporary authorized_keys: %s", strerror(errno));
         unlink(tmp);
         return -1;
     }
@@ -153,11 +164,13 @@ int open_reverse_tunnel(const char *id,const char *protocol,const char *url,int 
         if (!public_key || rms_ssh_inject_key(id, public_key) != 0) return -1;
     }
     if (pipe(control_pipe) != 0) {
+        syslog(LOG_ERR, "niseva tunnel: cannot create worker control pipe: %s", strerror(errno));
         rms_ssh_cleanup_key();
         return -1;
     }
     pid_t pid=fork();
     if(pid<0) {
+        syslog(LOG_ERR, "niseva tunnel: cannot start worker: %s", strerror(errno));
         close(control_pipe[0]);
         close(control_pipe[1]);
         control_pipe[0]=control_pipe[1]=-1;

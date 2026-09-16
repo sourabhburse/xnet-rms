@@ -315,6 +315,13 @@ static int proxy(SSL *ssl, const char *text)
     curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, receive_header);
     curl_easy_setopt(c, CURLOPT_HEADERDATA, &result);
     JSON_Object *input_headers = json_object_get_object(o, "headers");
+    /* The agent no longer forges a root-scoped sysauth cookie (that ubus SSO
+     * session flow was removed); it now relays whatever cookie the browser's
+     * own LuCI login produced. This only works paired with a gateway that
+     * forwards the real browser cookie end-to-end (see
+     * backend/internal/rms/gateway.go) - an older gateway still expecting the
+     * legacy agent-issued session will see LuCI reject every request. Do not
+     * roll this agent build out ahead of that gateway change. */
     const char *request_cookie = json_object_get_string(input_headers, "Cookie");
     if (!request_cookie)
         request_cookie = json_object_get_string(input_headers, "cookie");
