@@ -23,6 +23,7 @@
 #include <sys/prctl.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#include <syslog.h>
 static volatile sig_atomic_t stopped;
 
 static void stop(int sig)
@@ -361,37 +362,62 @@ int rms_tunnel_worker(const char *id, const char *protocol, const char *url, int
     signal(SIGHUP, stop);
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     if (getppid() == 1)
+    {
+        syslog(LOG_ERR, "niseva tunnel worker: parent disappeared before startup");
         return -1;
+    }
     stopped = 0;
+    const char *failure_stage = "unknown";
     char host[256], port[8] = "9443";
     if (strncmp(url, "https://", 8) || strlen(url + 8) >= sizeof(host))
+    {
+        syslog(LOG_ERR, "niseva tunnel worker: invalid gateway URL");
         return -1;
+    }
     strcpy(host, url + 8);
     char *colon = strrchr(host, ':');
     if (colon)
     {
         *colon++ = 0;
         if (!*colon || strspn(colon, "0123456789") != strlen(colon) || strlen(colon) >= sizeof(port))
+        {
+            syslog(LOG_ERR, "niseva tunnel worker: invalid gateway port");
             return -1;
+        }
         strcpy(port, colon);
     }
     if (!*host || strpbrk(host, "/\\@ \r\n"))
+    {
+        syslog(LOG_ERR, "niseva tunnel worker: invalid gateway host");
         return -1;
+    }
     int fd = tcp(host, port), dropbear_fd = -1, result = -1;
     SSL_CTX *ctx = NULL;
     SSL *ssl = NULL;
     if (fd < 0)
+    {
+        syslog(LOG_ERR, "niseva tunnel worker: gateway connection failed for %s:%s", host, port);
         return -1;
+    }
     ctx = SSL_CTX_new(TLS_client_method());
     if (!ctx)
+    {
+        failure_stage = "tls_context";
         goto done;
+    }
     SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
     if (SSL_CTX_load_verify_locations(ctx, RMS_CA_CRT, NULL) != 1 || SSL_CTX_use_certificate_file(ctx, RMS_CLIENT_CRT, SSL_FILETYPE_PEM) != 1 || SSL_CTX_use_PrivateKey_file(ctx, RMS_CLIENT_KEY, SSL_FILETYPE_PEM) != 1 || SSL_CTX_check_private_key(ctx) != 1)
+    {
+        failure_stage = "tls_credentials";
         goto done;
+    }
     ssl = SSL_new(ctx);
     if (!ssl)
+    {
+        failure_stage = "tls_session";
         goto done;
+    }
     SSL_set_fd(ssl, fd);
     SSL_set_tlsext_host_name(ssl, host);
     unsigned char ip[16];
@@ -399,15 +425,27 @@ int rms_tunnel_worker(const char *id, const char *protocol, const char *url, int
     if (inet_pton(AF_INET, host, ip) == 1)
     {
         if (X509_VERIFY_PARAM_set1_ip_asc(param, host) != 1)
+        {
+            failure_stage = "tls_server_identity";
             goto done;
+        }
     }
     else if (X509_VERIFY_PARAM_set1_host(param, host, 0) != 1)
+    {
+        failure_stage = "tls_server_identity";
         goto done;
+    }
     if (SSL_connect(ssl) != 1 || SSL_get_verify_result(ssl) != X509_V_OK)
+    {
+        failure_stage = "tls_connect";
         goto done;
+    }
     unsigned char nonce[16], hash[20];
     if (RAND_bytes(nonce, sizeof(nonce)) != 1)
+    {
+        failure_stage = "websocket_nonce";
         goto done;
+    }
     char *key = encode(nonce, sizeof(nonce));
     char handshake[1024], combined[128];
     snprintf(handshake, sizeof(handshake), "GET /router/%s HTTP/1.1\r\nHost: %s:%s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n", id, host, port, key);
@@ -417,6 +455,7 @@ int rms_tunnel_worker(const char *id, const char *protocol, const char *url, int
     char *accept = encode(hash, sizeof(hash));
     if (transfer(ssl, handshake, strlen(handshake), 1))
     {
+        failure_stage = "websocket_request";
         free(accept);
         goto done;
     }
@@ -426,6 +465,7 @@ int rms_tunnel_worker(const char *id, const char *protocol, const char *url, int
     {
         if (transfer(ssl, response + n, 1, 0))
         {
+            failure_stage = "websocket_response";
             free(accept);
             goto done;
         }
@@ -438,16 +478,26 @@ int rms_tunnel_worker(const char *id, const char *protocol, const char *url, int
     snprintf(expected, sizeof(expected), "Sec-WebSocket-Accept: %s\r\n", accept);
     free(accept);
     if (strncmp(response, "HTTP/1.1 101 ", 13) || !strcasestr(response, expected))
+    {
+        failure_stage = "websocket_rejected";
         goto done;
+    }
     int terminal = !strcmp(protocol, "TERMINAL_SSH") || !strcmp(protocol, "SSH_LUCI");
     if (terminal)
     {
         dropbear_fd = tcp("127.0.0.1", "22");
         if (dropbear_fd < 0)
+        {
+            failure_stage = "dropbear_connect";
             goto done;
+        }
     }
     time_t end = time(NULL) + ttl;
-    char control[128];
+    /* Control pipe carries a single fixed-width payload: the new deadline as
+     * a raw int64_t. A fixed-size read never asks for zero bytes, so it can't
+     * misread "buffer full" as "pipe closed" the way a line-buffered parser
+     * could. */
+    int64_t control_deadline;
     size_t control_used = 0;
     while (!stopped && time(NULL) < end)
     {
@@ -462,33 +512,19 @@ int rms_tunnel_worker(const char *id, const char *protocol, const char *url, int
         }
         if (control_fd >= 0 && f[2].revents)
         {
-            ssize_t n = read(control_fd, control + control_used, sizeof(control) - control_used - 1);
+            ssize_t n = read(control_fd, (char *)&control_deadline + control_used, sizeof(control_deadline) - control_used);
             if (n <= 0)
             {
                 stopped = 1;
                 continue;
             }
             control_used += (size_t)n;
-            control[control_used] = 0;
-            char *line = control, *nl;
-            while ((nl = strchr(line, '\n')) != NULL)
+            if (control_used == sizeof(control_deadline))
             {
-                *nl = 0;
-                if (!strncmp(line, "EXTEND ", 7))
-                {
-                    char *endptr = NULL;
-                    long long next = strtoll(line + 7, &endptr, 10);
-                    time_t now = time(NULL);
-                    if (endptr != line + 7 && *endptr == 0 && next > now && next <= now + 3600)
-                        end = (time_t)next;
-                }
-                line = nl + 1;
-            }
-            if (line != control)
-            {
-                size_t remaining = control + control_used - line;
-                memmove(control, line, remaining);
-                control_used = remaining;
+                time_t now = time(NULL);
+                if (control_deadline > now && control_deadline <= now + RMS_SESSION_EXTEND_MAX_SECS)
+                    end = (time_t)control_deadline;
+                control_used = 0;
             }
         }
         if (SSL_pending(ssl) || f[0].revents)
@@ -526,8 +562,17 @@ int rms_tunnel_worker(const char *id, const char *protocol, const char *url, int
                 break;
         }
     }
-    result = 0;
+    if (!stopped && time(NULL) < end)
+    {
+        result = -1;
+        if (!strcmp(failure_stage, "unknown"))
+            failure_stage = "stream_closed";
+    }
+    else
+        result = 0;
 done:
+    if (result != 0)
+        syslog(LOG_ERR, "niseva tunnel worker: session %s failed at %s", id, failure_stage);
     if (control_fd >= 0)
         close(control_fd);
     if (dropbear_fd >= 0)

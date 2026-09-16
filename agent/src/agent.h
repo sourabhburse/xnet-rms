@@ -23,6 +23,7 @@
 #define RMS_CLIENT_CRT "/etc/xnet-rms/client.crt"
 #define RMS_CA_CRT "/etc/xnet-rms/ca.crt"
 #define MAX_TELEMETRY_BACKLOG_BYTES (2 * 1024 * 1024)
+#define RMS_SESSION_EXTEND_MAX_SECS 3600
 
 typedef struct {
     int sim_slots;

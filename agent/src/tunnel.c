@@ -180,17 +180,16 @@ int open_reverse_tunnel(const char *id,const char *protocol,const char *url,int 
 }
 
 int extend_reverse_tunnel_session(const char *id,int seconds){
-    if(!running||tunnel_pid<=0||control_pipe[1]<0||!rms_id(id)||strcmp(active_session_id,id)!=0||seconds<1||seconds>3600)return -1;
+    if(!running||tunnel_pid<=0||control_pipe[1]<0||!rms_id(id)||strcmp(active_session_id,id)!=0||seconds<1||seconds>RMS_SESSION_EXTEND_MAX_SECS)return -1;
     /* The worker may have exited between the MQTT callback and the main-loop
      * reap. Do not let a closed control pipe terminate the agent with SIGPIPE. */
     signal(SIGPIPE,SIG_IGN);
-    char message[64];
-    time_t deadline=time(NULL)+seconds;
-    int n=snprintf(message,sizeof(message),"EXTEND %lld\n",(long long)deadline);
-    if(n<0||n>=(int)sizeof(message))return -1;
+    /* Control pipe carries a single fixed-width payload: the new deadline as
+     * a raw int64_t, so the worker never has to buffer/parse a text line. */
+    int64_t deadline=(int64_t)(time(NULL)+seconds);
     ssize_t sent;
-    do { sent=write(control_pipe[1],message,(size_t)n); } while(sent<0&&errno==EINTR);
-    if(sent!=n)return -1;
+    do { sent=write(control_pipe[1],&deadline,sizeof(deadline)); } while(sent<0&&errno==EINTR);
+    if(sent!=(ssize_t)sizeof(deadline))return -1;
     uloop_timeout_set(&ttl,seconds*1000);
     return 0;
 }
