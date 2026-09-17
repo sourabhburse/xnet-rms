@@ -1,6 +1,7 @@
 export interface AppRoute {
   view: string;
   deviceSerial: string | null;
+  templateId: string | null;
 }
 
 const ADMIN_VIEWS = new Set([
@@ -25,16 +26,25 @@ export function parseAppRoute(pathname: string, search: string): AppRoute {
   const path = pathname.replace(/\/+$/, "") || "/";
 
   if (path === "/" || path === "/overview") {
-    return { view: "dashboard", deviceSerial: null };
+    return { view: "dashboard", deviceSerial: null, templateId: null };
+  }
+
+  if (path === "/templates/new") {
+    return { view: "template-new", deviceSerial: null, templateId: null };
+  }
+
+  if (path.startsWith("/templates/") && path.endsWith("/edit")) {
+    const templateId = path.slice("/templates/".length, -"/edit".length).replace(/\/$/, "");
+    return { view: "template-edit", deviceSerial: null, templateId: templateId || null };
   }
 
   if (path === "/devices") {
     const tab = new URLSearchParams(search).get("tab") || "";
-    return { view: DEVICE_TABS[tab] || "devices", deviceSerial: null };
+    return { view: DEVICE_TABS[tab] || "devices", deviceSerial: null, templateId: null };
   }
 
   if (path === "/onboarding") {
-    return { view: "onboarding", deviceSerial: null };
+    return { view: "onboarding", deviceSerial: null, templateId: null };
   }
 
   if (path.startsWith("/devices/")) {
@@ -43,36 +53,38 @@ export function parseAppRoute(pathname: string, search: string): AppRoute {
       return {
         view: "devices",
         deviceSerial: decodeURIComponent(encodedSerial),
+        templateId: null,
       };
     } catch {
-      return { view: "devices", deviceSerial: encodedSerial };
+      return { view: "devices", deviceSerial: encodedSerial, templateId: null };
     }
   }
 
   if (path === "/sessions") {
-    return { view: "sessions", deviceSerial: null };
+    return { view: "sessions", deviceSerial: null, templateId: null };
   }
 
   if (path === "/reports") {
-    return { view: "reports", deviceSerial: null };
+    return { view: "reports", deviceSerial: null, templateId: null };
   }
 
   if (path === "/alerts") {
-    return { view: "alerts", deviceSerial: null };
+    return { view: "alerts", deviceSerial: null, templateId: null };
   }
 
   if (path.startsWith("/admin/")) {
     const section = path.slice("/admin/".length);
     if (section === "enrollment-tokens") {
-      return { view: "onboarding", deviceSerial: null };
+      return { view: "onboarding", deviceSerial: null, templateId: null };
     }
     return {
       view: ADMIN_VIEWS.has(section) ? section : "dashboard",
       deviceSerial: null,
+      templateId: null,
     };
   }
 
-  return { view: "dashboard", deviceSerial: null };
+  return { view: "dashboard", deviceSerial: null, templateId: null };
 }
 
 export function routeForView(view: string): string {
@@ -110,6 +122,14 @@ export function routeForView(view: string): string {
     default:
       return "/overview";
   }
+}
+
+export function routeForTemplateNew(): string {
+  return "/templates/new";
+}
+
+export function routeForTemplateEdit(id: string): string {
+  return `/templates/${encodeURIComponent(id)}/edit`;
 }
 
 export function routeForDevice(serial: string): string {

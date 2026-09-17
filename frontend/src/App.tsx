@@ -56,7 +56,7 @@ function LoadingScreen() {
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { view, deviceSerial } = useMemo(
+  const { view, deviceSerial, templateId } = useMemo(
     () => parseAppRoute(location.pathname, location.search),
     [location.pathname, location.search]
   );
@@ -202,12 +202,13 @@ export default function App() {
           setSelectedDevice(matched || null);
           if (!matched) setGlobalError('The requested device was not found.');
         }
-      } else if (['users', 'enrollment-tokens', 'audit-logs', 'organizations', 'profiles', 'products', 'bundles'].includes(view)) {
+      } else if (['users', 'enrollment-tokens', 'audit-logs', 'organizations', 'profiles', 'template-new', 'template-edit', 'products', 'bundles'].includes(view)) {
+        const isTemplateView = view === 'profiles' || view === 'template-new' || view === 'template-edit';
         const suffix = selectedOrg && ['users', 'enrollment-tokens', 'audit-logs'].includes(view)
           ? `?organization_id=${encodeURIComponent(selectedOrg)}`
           : '';
-        const endpoint = view === 'profiles' ? 'monitoring/templates' : view;
-        const templateSuffix = view === 'profiles' && selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : suffix;
+        const endpoint = isTemplateView ? 'monitoring/templates' : view;
+        const templateSuffix = isTemplateView && selectedOrg ? `?organization_id=${encodeURIComponent(selectedOrg)}` : suffix;
         const res = await api<any[]>(`${endpoint}${templateSuffix}`);
         setAdminData(Array.isArray(res) ? res : []);
         setAdminDataView(view);
@@ -322,12 +323,15 @@ export default function App() {
     users: 'Users & access',
     'enrollment-tokens': 'Enrollment tokens',
     profiles: 'Monitoring templates',
+    'template-new': 'New monitoring template',
+    'template-edit': 'Publish new version',
     'audit-logs': 'Audit records',
     organizations: 'Customers',
     products: 'Products',
     bundles: 'Collector bundles',
   };
 
+  const shellView = view === 'template-new' || view === 'template-edit' ? 'profiles' : view;
   const crumb = detailDevice ? (
     <>
       <span>Devices</span>
@@ -339,6 +343,12 @@ export default function App() {
       <span>Devices</span>
       <span className="mx-1.5 text-muted-foreground">/</span>
       <b>{deviceSerial}</b>
+    </>
+  ) : view === 'template-new' || view === 'template-edit' ? (
+    <>
+      <span>Monitoring templates</span>
+      <span className="mx-1.5 text-muted-foreground">/</span>
+      <b>{view === 'template-new' ? 'New monitoring template' : 'Publish new version'}</b>
     </>
   ) : (
     <b>{viewTitles[view] || 'Overview'}</b>
@@ -356,7 +366,7 @@ export default function App() {
           setSelectedOrg(orgId);
           setPage(1);
         }}
-        currentView={view}
+        currentView={shellView}
         onSelectView={goToView}
         counts={{ devices: deviceTotal, sessions: activeSessionCount, alerts: alertUnread, onboarding: pendingCount + awaitingCount }}
         crumb={crumb}
@@ -496,7 +506,7 @@ export default function App() {
             {view === 'alerts' && (
               <AlertsView user={user} selectedOrg={selectedOrg} onUnreadChange={setAlertUnread} />
             )}
-            {['users', 'enrollment-tokens', 'organizations', 'profiles', 'products', 'bundles', 'audit-logs'].includes(view) && (
+            {['users', 'enrollment-tokens', 'organizations', 'profiles', 'template-new', 'template-edit', 'products', 'bundles', 'audit-logs'].includes(view) && (
               <AdminViews
                 view={view}
                 currentUser={user}
@@ -507,6 +517,8 @@ export default function App() {
                 selectedOrg={selectedOrg}
                 loading={loading || refreshing}
                 onRefresh={refreshData}
+                templateId={templateId}
+                onNavigate={goToView}
               />
             )}
           </div>

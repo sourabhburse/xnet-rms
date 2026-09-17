@@ -12,11 +12,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import MonitoringTemplates from "./MonitoringTemplates";
+import MonitoringTemplateEditor from "./MonitoringTemplateEditor";
 import UsersAccessView from "./UsersAccessView";
 import AuditRecordsView from "./AuditRecordsView";
 import ProductsView from "./ProductsView";
 
-interface AdminViewsProps { view: string; currentUser: User; data: any[]; organizations: Organization[]; groups: DeviceGroup[]; tags: TagItem[]; selectedOrg: string; loading: boolean; onRefresh: () => void; }
+interface AdminViewsProps { view: string; currentUser: User; data: any[]; organizations: Organization[]; groups: DeviceGroup[]; tags: TagItem[]; selectedOrg: string; loading: boolean; onRefresh: () => void; templateId?: string | null; onNavigate?: (view: string) => void; }
 const selectClass = "h-9 w-full rounded-md border border-input bg-card px-3 text-[12px] text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/25";
 
 function AdminHeader({ title, description, icon: Icon, loading, onRefresh, actionLabel, onAction }: { title: string; description: string; icon: React.ComponentType<{ className?: string }>; loading: boolean; onRefresh: () => void; actionLabel?: string; onAction?: () => void }) {
@@ -27,7 +28,7 @@ function EmptyTable({ colSpan, loading, text }: { colSpan: number; loading: bool
   return <TableRow><TableCell colSpan={colSpan} className="h-28 text-center text-xs text-muted-foreground">{loading ? "Loading…" : text}</TableCell></TableRow>;
 }
 
-export default function AdminViews({ view, currentUser, data, organizations, groups, tags, selectedOrg, loading, onRefresh }: AdminViewsProps) {
+export default function AdminViews({ view, currentUser, data, organizations, groups, tags, selectedOrg, loading, onRefresh, templateId, onNavigate }: AdminViewsProps) {
   const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -71,6 +72,10 @@ export default function AdminViews({ view, currentUser, data, organizations, gro
   const scopeSelect = isSuperAdmin && <select aria-label="Customer organization" value={targetOrg} onChange={(event) => setTargetOrg(event.target.value)} className={selectClass}><option value="">Select organization</option>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select>;
 
   if (view === "profiles") return <MonitoringTemplates currentUser={currentUser} data={data as MonitoringTemplate[]} organizations={organizations} groups={groups} tags={tags} selectedOrg={selectedOrg} loading={loading} onRefresh={onRefresh} />;
+
+  if (view === "template-new" || view === "template-edit") {
+    return <MonitoringTemplateEditor currentUser={currentUser} organizations={organizations} selectedOrg={selectedOrg} templateId={templateId || null} data={data as MonitoringTemplate[]} loading={loading} onCancel={() => onNavigate?.("profiles")} onSaved={() => { onRefresh(); onNavigate?.("profiles"); }} />;
+  }
 
   if (view === "products") return <ProductsView currentUser={currentUser} onRefresh={onRefresh} />;
 
