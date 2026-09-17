@@ -141,53 +141,95 @@ fi
 add_number "throughput_bps" "$throughput_bps"
 
 # Prefer the interface-provided DNS server as the uplink reachability probe;
-# fall back to its gateway. Three one-second probes keep this collector bounded.
+# fall back to its gateway. One bounded probe avoids holding the entire
+# overview collector open for the normal multi-packet ping interval.
 probe=$dns_server
 [ -n "$probe" ] || probe=$gateway
 case "$probe" in
 	''|*[!0-9A-Fa-f:.]*) probe='' ;;
 esac
 if [ -n "$probe" ]; then
-	ping_output=$(ping -c 3 -W 1 "$probe" 2>/dev/null || true)
+	ping_output=$(ping -c 1 -W 1 "$probe" 2>/dev/null || true)
 	add_number "packet_loss_percent" "$(printf '%s\n' "$ping_output" | sed -n 's/.* \([0-9][0-9]*\)% packet loss.*/\1/p' | tail -n 1)"
 	add_number "latency_ms" "$(printf '%s\n' "$ping_output" | sed -n 's/.* = [0-9.]*\/\([0-9.]*\)\/.*/\1/p' | tail -n 1)"
 fi
 
-# Legacy 2S images expose modem data through cellular.status. Newer
-# cellulard-v2 images additionally expose RSRP/SINR through get_signal; use
-# those fields when present and never turn an unsupported value into zero.
-cellular=$(ubus call cellular status 2>/dev/null || true)
-message=$(jsonfilter -s "$cellular" -e '@.message' 2>/dev/null || true)
-add_number "rssi_dbm" "$(jsonfilter -s "$message" -e '@[0].rssi' 2>/dev/null || true)"
-add_string "network_type" "$(jsonfilter -s "$message" -e '@[0].net_type' 2>/dev/null || true)"
-add_string "registration" "$(jsonfilter -s "$message" -e '@[0].registration' 2>/dev/null || true)"
-add_string "operator_name" "$(jsonfilter -s "$message" -e '@[0].plmn_description' 2>/dev/null || true)"
-add_string "band" "$(jsonfilter -s "$message" -e '@[0].band' 2>/dev/null || true)"
-add_string "sim_status" "$(jsonfilter -s "$message" -e '@[0].sim_status' 2>/dev/null || true)"
-add_string "data_connectivity" "$(jsonfilter -s "$message" -e '@[0].data_connectivity' 2>/dev/null || true)"
-plmn=$(jsonfilter -s "$message" -e '@[0].plmn' 2>/dev/null || true)
-[ -n "$plmn" ] || plmn=$(jsonfilter -s "$message" -e '@[0].plmn_code' 2>/dev/null || true)
-add_string "plmn" "$plmn"
-add_string "roaming" "$(jsonfilter -s "$message" -e '@[0].roaming' 2>/dev/null || true)"
-cellular_ip=$(jsonfilter -s "$message" -e '@[0].ip' 2>/dev/null || true)
-cellular_uptime=$(jsonfilter -s "$message" -e '@[0].connection_uptime' 2>/dev/null || true)
+# Use one coherent modem API per sample. cellulard-v2 is preferred when it has
+# a discovered modem; otherwise fall back to the legacy cellulard2
+# cellular.status object. Both paths are normalized to the same dashboard
+# fields, and unsupported signal values are omitted instead of reported as 0.
+cellular_api_running=0
+cellular_ip=''
+cellular_uptime=''
+v2_inventory=''
+if v2_inventory=$(ubus call cellulard list '{}' 2>/dev/null); then
+	cellular_api_running=1
+fi
+
+modem=$(jsonfilter -s "$v2_inventory" -e '@.modems[0].id' 2>/dev/null || true)
+case "$modem" in
+	''|*[!A-Za-z0-9_.-]*) modem='' ;;
+esac
+
+if [ -n "$modem" ]; then
+	modem_object="cellulard.modem.$modem"
+	info=$(ubus call "$modem_object" get_info '{}' 2>/dev/null || true)
+	signal=$(ubus call "$modem_object" get_signal '{}' 2>/dev/null || true)
+	network=$(ubus call "$modem_object" get_network_status '{}' 2>/dev/null || true)
+	bearer=$(ubus call "$modem_object.bearer" get_stats '{}' 2>/dev/null || true)
+
+	rssi=$(jsonfilter -s "$signal" -e '@.rssi_dbm' 2>/dev/null || true)
+	rsrp=$(jsonfilter -s "$signal" -e '@.rsrp_dbm' 2>/dev/null || true)
+	sinr=$(jsonfilter -s "$signal" -e '@.sinr_db' 2>/dev/null || true)
+	case "$rssi" in -[5-9][0-9]|-1[01][0-9]|-120) add_number "rssi_dbm" "$rssi" ;; esac
+	case "$rsrp" in -[3-9][0-9]|-1[0-3][0-9]|-140) add_number "rsrp_dbm" "$rsrp" ;; esac
+	case "$sinr" in -[0-9]|-1[0-9]|-20|[0-9]|[1-3][0-9]|40) add_number "sinr_db" "$sinr" ;; esac
+
+	network_type=$(jsonfilter -s "$network" -e '@.access_technology' 2>/dev/null || true)
+	[ -n "$network_type" ] || network_type=$(jsonfilter -s "$signal" -e '@.service' 2>/dev/null || true)
+	add_string "network_type" "$network_type"
+	add_string "registration" "$(jsonfilter -s "$network" -e '@.registration_state' 2>/dev/null || true)"
+	add_string "operator_name" "$(jsonfilter -s "$network" -e '@.operator_name' 2>/dev/null || true)"
+	add_string "band" "$(jsonfilter -s "$network" -e '@.band' 2>/dev/null || true)"
+	add_string "sim_status" "$(jsonfilter -s "$info" -e '@.sim_state' 2>/dev/null || true)"
+	mcc=$(jsonfilter -s "$network" -e '@.mcc' 2>/dev/null || true)
+	mnc=$(jsonfilter -s "$network" -e '@.mnc' 2>/dev/null || true)
+	if [ -n "$mcc" ] && [ -n "$mnc" ]; then add_string "plmn" "$mcc$mnc"; fi
+	add_string "roaming" "$(jsonfilter -s "$network" -e '@.roaming' 2>/dev/null || true)"
+
+	connected=$(jsonfilter -s "$bearer" -e '@.connected' 2>/dev/null || true)
+	case "$connected" in
+		true|1) data_connectivity=connected ;;
+		false|0) data_connectivity=disconnected ;;
+		*) data_connectivity=$(jsonfilter -s "$bearer" -e '@.state' 2>/dev/null || true) ;;
+	esac
+	add_string "data_connectivity" "$data_connectivity"
+	cellular_ip=$(jsonfilter -s "$bearer" -e '@.ipv4' 2>/dev/null || true)
+else
+	cellular=''
+	if cellular=$(ubus call cellular status 2>/dev/null); then
+		cellular_api_running=1
+		message=$(jsonfilter -s "$cellular" -e '@.message' 2>/dev/null || true)
+		add_number "rssi_dbm" "$(jsonfilter -s "$message" -e '@[0].rssi' 2>/dev/null || true)"
+		add_string "network_type" "$(jsonfilter -s "$message" -e '@[0].net_type' 2>/dev/null || true)"
+		add_string "registration" "$(jsonfilter -s "$message" -e '@[0].registration' 2>/dev/null || true)"
+		add_string "operator_name" "$(jsonfilter -s "$message" -e '@[0].plmn_description' 2>/dev/null || true)"
+		add_string "band" "$(jsonfilter -s "$message" -e '@[0].band' 2>/dev/null || true)"
+		add_string "sim_status" "$(jsonfilter -s "$message" -e '@[0].sim_status' 2>/dev/null || true)"
+		add_string "data_connectivity" "$(jsonfilter -s "$message" -e '@[0].data_connectivity' 2>/dev/null || true)"
+		plmn=$(jsonfilter -s "$message" -e '@[0].plmn' 2>/dev/null || true)
+		[ -n "$plmn" ] || plmn=$(jsonfilter -s "$message" -e '@[0].plmn_code' 2>/dev/null || true)
+		add_string "plmn" "$plmn"
+		add_string "roaming" "$(jsonfilter -s "$message" -e '@[0].roaming' 2>/dev/null || true)"
+		cellular_ip=$(jsonfilter -s "$message" -e '@[0].ip' 2>/dev/null || true)
+		cellular_uptime=$(jsonfilter -s "$message" -e '@[0].connection_uptime' 2>/dev/null || true)
+	fi
+fi
 case "$logical_iface" in
 	LTE*) [ -n "$cellular_ip" ] || cellular_ip=$uplink_ip; [ -n "$cellular_uptime" ] || cellular_uptime=$(jsonfilter -s "$logical_status" -e '@.uptime' 2>/dev/null || true) ;;
 esac
 add_string "cellular_ip" "$cellular_ip"
 add_number "cellular_uptime_seconds" "$cellular_uptime"
-
-modem=$(ubus list 2>/dev/null | sed -n 's/^cellulard\.modem\.\([A-Za-z0-9_-]*\)$/\1/p' | head -n 1)
-case "$modem" in
-	''|*[!A-Za-z0-9_-]*) modem='' ;;
-esac
-if [ -n "$modem" ]; then
-	signal=$(ubus call "cellulard.modem.$modem" get_signal '{}' 2>/dev/null || true)
-	rsrp=$(jsonfilter -s "$signal" -e '@.rsrp_dbm' 2>/dev/null || true)
-	sinr=$(jsonfilter -s "$signal" -e '@.sinr_db' 2>/dev/null || true)
-	case "$rsrp" in -[3-9][0-9]|-1[0-3][0-9]|-140) add_number "rsrp_dbm" "$rsrp" ;; esac
-	case "$sinr" in -[0-9]|-1[0-9]|[0-9]|[1-3][0-9]|40) add_number "sinr_db" "$sinr" ;; esac
-fi
 
 for temp_file in /sys/class/thermal/thermal_zone*/temp; do
 	[ -r "$temp_file" ] || continue
@@ -238,7 +280,7 @@ if [ -n "$wireless" ]; then
 fi
 
 if /etc/init.d/niseva-agent running >/dev/null 2>&1; then add_string "rms_agent_state" "running"; else add_string "rms_agent_state" "stopped"; fi
-if pidof cellulard2_2s cellulard cellular >/dev/null 2>&1; then add_string "cellular_service_state" "running"; else add_string "cellular_service_state" "stopped"; fi
+if [ "$cellular_api_running" -eq 1 ] || pidof cellulard2_2s cellulard2 cellulard cellular >/dev/null 2>&1; then add_string "cellular_service_state" "running"; else add_string "cellular_service_state" "stopped"; fi
 if pidof dnsmasq >/dev/null 2>&1; then add_string "dns_service_state" "running"; else add_string "dns_service_state" "stopped"; fi
 
 leases=$(ubus call dhcp ipv4leases 2>/dev/null || true)
@@ -246,16 +288,19 @@ if [ -n "$leases" ]; then
 	add_number "dhcp_lease_count" "$(printf '%s' "$leases" | grep -c '"mac"' 2>/dev/null || true)"
 fi
 
-mwan=$(ubus call mwan3 status 2>/dev/null || true)
-if [ -n "$mwan" ]; then
-	mwan_lte2_up=$(jsonfilter -s "$mwan" -e '@.interfaces.LTE2.up' 2>/dev/null || true)
-	mwan_lte2_state=$(jsonfilter -s "$mwan" -e '@.interfaces.LTE2.status' 2>/dev/null || true)
-	[ "$mwan_lte2_up" = "true" ] && mwan_lte2_state=up
-	[ "$mwan_lte2_up" = "false" ] && [ "$mwan_lte2_state" = "unknown" ] && mwan_lte2_state=down
-	add_string "mwan_lte2_state" "$mwan_lte2_state"
-	add_number "mwan_lte2_uptime_seconds" "$(jsonfilter -s "$mwan" -e '@.interfaces.LTE2.uptime' 2>/dev/null || true)"
-	add_number "mwan_lte2_lost" "$(jsonfilter -s "$mwan" -e '@.interfaces.LTE2.lost' 2>/dev/null || true)"
-	add_number "mwan_lte2_score" "$(jsonfilter -s "$mwan" -e '@.interfaces.LTE2.score' 2>/dev/null || true)"
+mwan_lte2_enabled=$(uci -q get mwan3.LTE2.enabled 2>/dev/null || true)
+if [ "$mwan_lte2_enabled" = "1" ]; then
+	mwan=$(ubus call mwan3 status 2>/dev/null || true)
+	if [ -n "$mwan" ]; then
+		mwan_lte2_up=$(jsonfilter -s "$mwan" -e '@.interfaces.LTE2.up' 2>/dev/null || true)
+		mwan_lte2_state=$(jsonfilter -s "$mwan" -e '@.interfaces.LTE2.status' 2>/dev/null || true)
+		[ "$mwan_lte2_up" = "true" ] && mwan_lte2_state=up
+		[ "$mwan_lte2_up" = "false" ] && [ "$mwan_lte2_state" = "unknown" ] && mwan_lte2_state=down
+		add_string "mwan_lte2_state" "$mwan_lte2_state"
+		add_number "mwan_lte2_uptime_seconds" "$(jsonfilter -s "$mwan" -e '@.interfaces.LTE2.uptime' 2>/dev/null || true)"
+		add_number "mwan_lte2_lost" "$(jsonfilter -s "$mwan" -e '@.interfaces.LTE2.lost' 2>/dev/null || true)"
+		add_number "mwan_lte2_score" "$(jsonfilter -s "$mwan" -e '@.interfaces.LTE2.score' 2>/dev/null || true)"
+	fi
 fi
 
 if [ -n "${cpu_total:-}" ] && [ -n "${cpu_idle:-}" ] && [ -n "${sample_time:-}" ]; then

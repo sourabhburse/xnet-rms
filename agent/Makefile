@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=niseva-agent
 PKG_VERSION:=2.3.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_MAINTAINER:=Niseva Engineering <support@niseva.com>
 PKG_LICENSE:=Proprietary
@@ -53,3 +53,24 @@ define Package/$(PKG_NAME)/install
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))
+
+define Package/niseva-agent-ipsec
+	SECTION:=niseva
+	CATEGORY:=xNet
+	SUBMENU:=Management
+	TITLE:=Niseva RMS strongSwan VICI IPsec collector
+	DEPENDS:=+niseva-agent +strongswan-mod-vici
+	URL:=https://www.niseva.com
+endef
+
+define Package/niseva-agent-ipsec/description
+	Optional read-only strongSwan VICI collector for per-tunnel IPsec monitoring.
+	The base RMS agent automatically uses it when this package is installed.
+endef
+
+define Package/niseva-agent-ipsec/install
+	$(INSTALL_DIR) $(1)/usr/libexec/xnet-rms
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/niseva-ipsec-collector $(1)/usr/libexec/xnet-rms/ipsec-vici
+endef
+
+$(eval $(call BuildPackage,niseva-agent-ipsec))

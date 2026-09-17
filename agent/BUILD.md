@@ -1,4 +1,4 @@
-# Agent 2.3.0-1
+# Agent 2.3.0-2
 
 Build from the repository root using the existing OpenWrt staging libraries and
 GCC 7.5.0 MIPS musl toolchain. The script reads that tree and writes only to a
@@ -8,9 +8,12 @@ temporary build directory and the requested artifact directory:
 OPENWRT_ROOT=/home/sourabh/openwrt-19.07 sh agent/scripts/build-mips.sh
 ```
 
-Outputs are in `artifacts/agent-2.3.0/`: IPK, stripped binary, unstripped binary,
-ELF metadata and SHA256 checksums. The IPK is assembled with OpenWrt's
-`ipkg-build` after cross-compilation; this is not a complete firmware build.
+Outputs are in `artifacts/agent-2.3.0/`: base and optional IPsec IPKs, stripped
+and unstripped binaries, ELF metadata and SHA256 checksums. The IPKs are
+assembled with OpenWrt's `ipkg-build` after cross-compilation; this is not a
+complete firmware build. Install `niseva-agent-ipsec` only on products that
+ship strongSwan's `strongswan-mod-vici` capability; the base agent falls back
+to the existing `ipsec.lua` collector when the optional executable is absent.
 For feed builds, use `agent/Makefile` and the target firmware's dependency resolver.
 
 ## Changes
@@ -25,11 +28,11 @@ For feed builds, use `agent/Makefile` and the target firmware's dependency resol
   short-lived rpcd LuCI sessions and a terminal PTY.
 - Fixed architecture parsing and removed shared demo identity/firmware defaults.
 - Disabled-by-default service; installation-specific trust is never packaged.
-- Approved built-in overview, StrongSwan, and optional Modbus health
-  collectors at `/usr/libexec/xnet-rms/device-overview.sh`,
-  `/usr/libexec/xnet-rms/ipsec.lua`, and
-  `/usr/libexec/xnet-rms/modbus-health.sh`. Capability-specific collectors
-  return the bounded `unsupported` state when their subsystem is absent.
+- Approved built-in overview, optional strongSwan VICI IPsec, Lua fallback, and
+  Modbus health collectors at `/usr/libexec/xnet-rms/device-overview.sh`,
+  `/usr/libexec/xnet-rms/ipsec-vici`, `/usr/libexec/xnet-rms/ipsec.lua`, and
+  `/usr/libexec/xnet-rms/modbus-health.sh`. The VICI collector is read-only;
+  the base agent selects it dynamically when the optional package is present.
 
 ## Verification
 

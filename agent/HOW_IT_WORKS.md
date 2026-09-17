@@ -1,399 +1,721 @@
-# How the XNET RMS router agent works
+# XNET RMS router agent: full workflow
 
-Applies to the current **2.0.0-1** implementation. This document describes the
-code in this repository, including its current limits. Cross-compilation and
-host tests have passed; operation on the XE33 2S has not yet been qualified.
+This document describes the current implementation of the native agent in this
+repository. It is intended to explain the runtime workflow, ownership of each
+step, local files and sockets, failure behavior, and the limits of what has
+actually been qualified.
 
-## 1. What runs on the router
-
-The agent is a C program installed as `/usr/sbin/niseva-agent`. OpenWrt's `procd`
-service manager starts and supervises it through `/etc/init.d/niseva-agent`.
-The installed configuration disables it until installation trust and connection
-settings have been provisioned.
-
-The agent performs four jobs:
-
-1. Establishes and maintains the router's certificate identity.
-2. Downloads assigned monitoring profiles and actively collects their JSON.
-3. Buffers snapshots and sends them to RMS until application acknowledgments arrive.
-4. Opens one authorized LuCI or terminal session through the tunnel gateway.
-
-It initiates outbound connections. RMS does not need a publicly reachable router
-address or an inbound port forwarded to the router.
-
-```mermaid
-flowchart LR
-    Core[Go core service] <-->|Verified HTTPS: enrollment, certificates, profiles| Agent[Router agent]
-    Agent -->|Snapshots and heartbeat over MQTT TLS| Broker[Dedicated RMS broker]
-    Broker -->|Commands and snapshot ACKs| Agent
-    Broker <--> Core
-    Agent -->|Outbound authenticated WebSocket| Tunnel[Go tunnel service]
-    Browser[Operator browser] <-->|Session-specific HTTPS / WebSocket| Tunnel
-    Agent --> Collector[Script or ubus collector]
-    Collector -->|JSON stdout| Agent
-    Agent --> Local[Local LuCI or terminal PTY]
-```
-
-Customer permissions, historical storage, chart definitions, and session
-authorization belong to the backend. The router executes the assigned collection
-instructions and transports the results.
-
-## 2. Startup and process structure
-
-At startup, the main process initializes its event loop, cryptographic randomness,
-MQTT library, and empty telemetry queue. It reads board metadata from
-`/var/xnet_board_info.json`, with fallbacks to local system files for MAC address,
-model, architecture, and firmware information.
-
-An explicitly configured `serial_number` overrides the detected serial. When
-board metadata has no serial, the code can use the complete MAC address prefixed
-with `MAC-`. It no longer supplies a shared demo serial. Startup fails if it
-cannot obtain a serial or required connection settings.
-
-The agent generates a random `boot_id` on **each agent process start**. Despite
-its name, this identifies an agent run; restarting the service changes it even
-without rebooting Linux.
-
-| Execution context | Work performed |
-|---|---|
-| Main process | MQTT callbacks, heartbeat, telemetry queue, collection scheduling and child supervision |
-| Enrollment/profile worker | HTTPS certificate operations or profile and bundle downloads; one such worker at a time |
-| Scheduled collector child | One script or `ubus call` at a time |
-| Tunnel worker | One remote session, TLS/WebSocket traffic, local HTTP proxy or terminal handling |
-| Terminal shell child | Root shell attached to a pseudo-terminal, only during a terminal session |
-
-The main loop ticks approximately every 50 ms. Queue operations and MQTT callbacks
-run on this same loop. Slow HTTPS work and collector execution run in children.
-A script's activation check can run in the profile worker while a scheduled
-collector is active, so “one scheduled collector” does not mean only one script
-process can ever exist.
-
-The enrollment worker has a 60-second supervisory deadline; the profile worker
-has a 600-second deadline. Individual HTTPS requests have a 5-second connection
-timeout and a 15-second total timeout. Scheduling uses monotonic time; certificate
-validity and observation timestamps use the router's wall clock.
-
-## 3. Enrollment and certificate lifecycle
-
-### First enrollment
-
-The installer supplies the installation CA certificate, collector verification
-key, HTTPS endpoint, broker address, and customer enrollment token. A correct
-local clock is required before TLS and certificate validation can succeed.
-
-The first enrollment follows this sequence:
-
-1. Generate an EC P-256 private key locally at `/etc/xnet-rms/client.key`.
-2. Create and sign a certificate signing request (CSR).
-3. POST the CSR, serial, model, firmware version, and enrollment token to
-   `/api/v1/provision/check-in` over verified HTTPS.
-4. The core associates the router with the token's customer and returns an
-   immutable `device_id`, client certificate, and broker connection details.
-5. Validate the certificate's issuing CA, client-authentication purpose, device
-   identity, validity, and match with the local private key.
-6. Write the certificate atomically and save the returned identity and broker
-   settings in UCI. Reload configuration and connect to MQTT using the certificate.
-
-The private key is not uploaded. Existing key material is reused; a damaged key
-is not silently replaced. If an already identified router loses its private key,
-automatic recovery cannot prove that identity and requires operator intervention.
-
-### Renewal and recovery
-
-The backend issues one-year device certificates. The agent considers renewal due
-when 90 days or less remain and normally checks certificate state hourly. Failed
-certificate work is retried after approximately 60 seconds; initial work is
-staggered by a random delay of up to 14 seconds.
-
-| Certificate state | Agent action |
-|---|---|
-| Valid, more than 90 days left | Continue normal operation |
-| Valid, within renewal window | Call `/api/v1/provision/renew` using the client certificate |
-| Missing, unreadable, expired, or not yet valid | Attempt the challenge recovery path for a known device ID |
-| Known device ID but missing/unusable private key | Fail recovery; do not replace the identity |
-
-Recovery first requests `/api/v1/provision/challenge`. The agent checks that the
-challenge message is bound to its device ID, signs it using its existing key,
-and submits the proof to `/api/v1/provision/recover`. These calls still verify the
-HTTPS server, but do not present an expired client certificate. The backend must
-validate device authorization, revocation status, challenge freshness, and proof,
-and prevent challenge reuse.
-
-Recovery does not bypass a bad clock or missing CA trust: HTTPS verification must
-still succeed. The enrollment token is currently retained in UCI after enrollment;
-the code does not automatically erase it.
-
-## 4. Monitoring profiles and collector execution
-
-The agent retrieves assigned profiles from `/api/v1/agent/profiles` using its
-client certificate. It refreshes them approximately every five minutes and stores
-the accepted profile list at `/tmp/xnet-rms-profiles.json`.
-
-A profile specifies the source, version, collection interval, timeout, output
-limit, and either:
-
-- **ubus:** execute `/bin/ubus call <object> <method> <JSON arguments>`.
-- **script:** execute a particular version of a verified collector bundle.
-
-The agent collects the complete bounded JSON output. Declared field extraction,
-labels, units, status mappings, filtering, and historical aggregation are backend
-responsibilities; the agent does not build charts or average measurements.
-
-| Collection limit | Current value |
-|---|---|
-| Assigned profiles accepted by agent | Up to 16 |
-| Interval per profile | 60–300 seconds |
-| Execution timeout per profile | 1–15 seconds |
-| Output limit per profile | 256–32,768 bytes |
-| Initial delay after loading profiles | Random 0–29 seconds per profile |
-| Accepted collector output | One JSON object or array on stdout |
-
-The parent reads stdout without blocking its event loop. A timed-out or oversized
-collector is killed as a process group. The agent also cleans up the group when
-the direct child exits. Collector stdin and stderr are directed to `/dev/null`.
-Scripts should therefore emit their structured results on stdout and avoid
-interactive prompts or extra diagnostic text there.
-
-Exit code `0` with valid JSON produces `status: "ok"`. Exit code `2` is used for
-`unsupported`; other failures produce `error`. Current failure snapshots contain
-an empty data object and a generic error message: the original failing script's
-JSON diagnostics and stderr are not preserved.
-
-Collectors run with the agent's privileges, normally root. A child process and
-output/time limits are **not an operating-system security sandbox** or a CPU/RAM
-quota. Only trusted, reviewed collectors should be approved.
-
-### Signed collector bundles
-
-For a newly required bundle version, the agent downloads:
-
-`GET /api/v1/agent/bundles/<bundle_id>?version=<version>`
-
-It checks the requested identity/version, SHA-256 of the script, and its signature
-using `/etc/xnet-rms/collector.pub`. It then writes the script atomically, performs
-a bounded activation execution, and updates `current`/`previous` links. Accepted
-profile configuration is written only after the synchronization succeeds.
-
-Scripts are stored as `/etc/xnet-rms/collectors/<bundle_id>/<version>.sh`. The
-`.sh` suffix is a storage convention; the script's shebang chooses its interpreter.
-A Lua collector can therefore be stored under this filename.
-
-Scheduled execution uses the exact version in the profile, not the `current`
-symlink. Failed initial activation retains the previously accepted profile list.
-There is no automatic runtime rollback after later collection failures, and no
-old-version garbage collection yet. Already present version files are reused
-without signature re-verification on every synchronization.
-
-## 5. Snapshot delivery and acknowledgments
-
-Each collection produces an envelope like this illustrative example:
-
-```json
-{
-  "schema_version": 1,
-  "device_id": "11111111111111111111111111111111",
-  "source_id": "system",
-  "profile_id": "22222222222222222222222222222222",
-  "profile_version": 1,
-  "boot_id": "33333333333333333333333333333333",
-  "sequence": 1,
-  "observed_at": "2026-09-07T06:00:00Z",
-  "status": "ok",
-  "error": "",
-  "dropped": 0,
-  "data": {"uptime": 4200}
-}
-```
-
-`observed_at` records when the collection started. Sequence numbers increase
-across all sources during the current agent run. The `dropped` counter reports
-queue-overflow discards accumulated during that run.
-
-All topics are scoped to the immutable device identity:
-
-| Topic suffix under `rms/v1/devices/<device_id>/` | Direction | Purpose |
-|---|---|---|
-| `snapshots` | Router → core through broker | JSON snapshots, MQTT QoS 1 |
-| `acks` | Core → router through broker | Application-level snapshot acceptance |
-| `heartbeat` | Router → core through broker | Connectivity, normally QoS 0 |
-| `commands` | Core → router through broker | Authorized remote-session requests |
-
-The broker must enforce certificate-based topic permissions. Checking topic names
-inside the agent alone cannot establish who is authorized to publish commands.
-
-### The 2 MiB backlog
-
-Snapshots enter a FIFO linked queue in RAM. Queue accounting includes each node,
-topic, and serialized payload. The queue rejects payloads larger than 64 KiB and
-drops the oldest queued snapshots when space is required. The 2 MiB limit is for
-this accounted backlog—not total process memory, allocator overhead, TLS buffers,
-MQTT library buffers, or collector children.
-
-The agent attempts to publish the oldest queued entry no more frequently than
-approximately once every two seconds. It retains that entry until an application
-ACK matches its **boot ID, source ID, and exact sequence number**. A broker's MQTT
-PUBACK alone does not remove an entry.
-
-The backend commits accepted data before publishing the application ACK. If an ACK
-is lost, the agent sends the entry again and backend deduplication prevents a
-second historical record. This requires the corresponding backend implementation;
-it is not a property supplied by MQTT alone.
-
-An entry the backend permanently rejects can hold up later entries until it is
-removed by queue overflow. A negative-acknowledgment/quarantine path is not yet
-implemented.
-
-The backlog, sequence counter, and discard counter are lost on agent restart or
-router reboot. The profile cache is in `/tmp`: it can survive an agent restart
-within the same boot, but is normally lost on router reboot. Without a successful
-profile fetch after reboot, the router can send heartbeats but has no profiles to
-collect. Telemetry is not persisted to flash.
-
-## 6. Heartbeat and connectivity
-
-The agent sends `{"status":"online"}` on MQTT connection and every 60 seconds.
-It configures an MQTT last will containing `{"status":"offline"}` with a
-30-second keepalive. It attempts reconnects with jitter after connection errors.
-
-The backend also uses a 180-second heartbeat timeout; offline detection does not
-rely solely on the broker's last will. Heartbeats are separate from the telemetry
-queue, so an unacknowledged snapshot does not intentionally block them.
-
-Connectivity and source health are separate. A router can be online while its
-collector is failing, unsupported, waiting behind another collector, or stale.
-The dashboard determines freshness from snapshot observation time and profile
-interval.
-
-## 7. Remote LuCI and terminal sessions
-
-A user requests remote access through RMS. The core checks the user's role,
-customer ownership, router availability, and session limits before publishing an
-`open_session` command. The agent accepts only its device-specific command topic
-and the supported protocols `HTTP_LUCI` and `TERMINAL_SSH`.
-
-The command supplies a session ID, HTTPS gateway URL, and expiry. The agent rejects
-invalid IDs, unsupported protocols, expired requests, lifetimes over 900 seconds,
-and a new request while another tunnel worker is running. It does not terminate
-the current operator to make room.
-
-The worker initiates a TLS-authenticated WebSocket connection to
-`/router/<session_id>` on the tunnel service. The gateway must bind that session to
-the intended router certificate. Browser authorization and customer isolation are
-performed by the core and tunnel service, not by a local user database on the
+The service binary is installed as /usr/sbin/niseva-agent. OpenWrt starts it
+through /etc/init.d/niseva-agent. The router makes outbound HTTPS, MQTT, and
+WebSocket connections; RMS does not require an inbound port forwarded to the
 router.
 
-### LuCI
+The current package contains several version identifiers that should be
+reconciled before a release:
 
-The worker creates a temporary rpcd session through local ubus, sets its user to
-`root`, supplies a session token, and grants the required scopes. It injects the
-resulting authentication cookies when proxying requests to `http://127.0.0.1`.
-RMS therefore does not need to store a router root password.
+- The runtime, OpenWrt Makefile, and MIPS build helper now use version 2.2.0.
 
-HTTP requests and responses travel as JSON WebSocket messages with base64 bodies.
-The current local proxy has a 10-second request timeout and a 1 MiB response-body
-limit. It forwards selected headers and does not follow local HTTP redirects
-itself. The gateway isolates browser sessions using session-specific hostnames.
+Treat the source and package metadata as the release source of truth only after
+those values have been made consistent.
 
-This path assumes the router's LuCI service is available on local HTTP port 80 and
-its rpcd/session interfaces match the implementation. Single sign-on still needs
-verification against the actual XNET firmware.
+## 1. System boundary
 
-### Terminal
+The agent owns router-side identity, enrollment, certificate renewal, profile
+activation, local data collection, bounded buffering, MQTT transport, and the
+outbound remote-session tunnel.
 
-The worker creates a pseudo-terminal and starts `/bin/ash`, falling back to
-`/bin/sh`, as root. The current terminal size is fixed at 100 columns × 30 rows.
-Browser input and PTY output travel over the authenticated session.
+The backend owns customer and device state, claim/approval decisions, profile
+definitions, collector bundle signatures, telemetry application
+acknowledgments, operator authorization, session expiration, and the tunnel
+gateway.
 
-`TERMINAL_SSH` is the API protocol name; the implementation does **not** open an SSH
-connection or run an SSH server. It uses a local PTY and shell. Terminal resize
-messages and terminal recording are not implemented.
+The MQTT broker transports heartbeat, telemetry, commands, and telemetry
+acknowledgments. It is not the enrollment API and it is not the remote-session
+WebSocket gateway.
 
-### Closing a session
+~~~mermaid
+flowchart LR
+    Init[procd service] --> Agent[Router agent]
+    Agent -->|HTTPS + CA verification| API[RMS API]
+    Agent -->|MQTT over TLS + mTLS| Broker[RMS broker]
+    Agent -->|TLS + WebSocket + mTLS| Gateway[RMS tunnel gateway]
+    API -->|profiles and signed bundles| Agent
+    Broker -->|commands and application ACKs| Agent
+    Operator[Operator browser] -->|HTTPS/WebSocket| Gateway
+    Agent -->|ubus calls or signed scripts| Local[Router data sources]
+    Agent -->|HTTP proxy or SSH stream| Local
+    Local --> Agent
+~~~
 
-The agent has a monotonic expiry timer and the worker also checks its lifetime.
-On ordinary worker exit it closes sockets, destroys the temporary rpcd session,
-and terminates/reaps the terminal shell process group. A parent-death signal helps
-terminate a worker if the main agent exits unexpectedly. Rpcd timeout provides a
-further expiry boundary for temporary LuCI authentication.
 
-The agent currently has no separate `close_session` MQTT action. Explicit closure
-or revocation is enforced through the gateway: it checks the core periodically
-and closes the router connection. Abrupt power loss, forced termination, and all
-cleanup paths still require target testing. Arbitrary commands deliberately
-started by a root terminal user can create detached processes; this is not a
-restricted command sandbox.
+## 2. Processes and lifecycle
 
-## 8. Files and configuration
+The agent is one long-running process with short-lived children and workers.
 
-| Router path | Purpose | Lifetime |
-|---|---|---|
-| `/etc/config/niseva` | Connection settings, enrollment token, device ID | Persistent UCI configuration |
-| `/etc/xnet-rms/ca.crt` | Installation HTTPS/MQTT trust anchor | Provisioned persistently |
-| `/etc/xnet-rms/collector.pub` | Collector signature verification key | Provisioned persistently |
-| `/etc/xnet-rms/client.key` | Router-generated private identity key | Persistent; never upload |
-| `/etc/xnet-rms/client.crt` | Current device certificate | Replaced on successful renewal/recovery |
-| `/etc/xnet-rms/collectors/` | Downloaded versioned scripts | Persistent; no automatic pruning yet |
-| `/tmp/xnet-rms-profiles.json` | Accepted profile cache | Volatile across reboot |
-| `/usr/libexec/xnet-rms/ipsec.lua` | Packaged strongSwan collector source | Firmware/package file |
-| `/lib/upgrade/keep.d/niseva-agent` | Keeps configuration and identity during supported sysupgrade backup flows | Package file |
+| Context | Responsibility |
+| --- | --- |
+| Main process | UCI configuration, status, event loop, MQTT callbacks, heartbeat, retry scheduling, telemetry queue, collection scheduling, and child supervision |
+| Enrollment worker | Bootstrap check-in, certificate renewal, or certificate recovery |
+| Profile worker | Downloading profiles and activating signed collector bundles |
+| Collector child | One scheduled script or ubus collector execution at a time |
+| Tunnel worker | One remote session, including gateway TLS/WebSocket and local LuCI/SSH forwarding |
 
-| UCI option in section `general` | Meaning |
-|---|---|
-| `enabled` | Used by the init script; defaults to `0` |
-| `server_url` | Verified HTTPS core base URL; no trailing slash is recommended |
-| `mqtt_host` | Broker hostname; required at startup and updated by enrollment |
-| `mqtt_port` | Normally 8883; enrollment currently requires/returns 8883 |
-| `enrollment_token` | Customer token for first enrollment |
-| `device_id` | Backend-issued identity; do not assign manually |
-| `serial_number` | Optional explicit override for detected serial |
+There is at most one enrollment/profile worker at a time and at most one
+scheduled collector child at a time. Bundle activation is performed by the
+profile worker, so activation and a scheduled collector can overlap.
 
-Legacy `heartbeat_interval`, `telemetry_interval`, `mqtt_token`, and `provisioned`
-values are still read or stored by parts of the code, but do not control the new
-paths as their names might imply. Heartbeat is fixed at 60 seconds, collection
-intervals come from profiles, MQTT uses certificates, and provisioned state is
-recomputed from device identity and certificate dates. Legacy rollback/FOTA
-function declarations are not evidence of active features.
+The main event loop is driven at approximately 50 ms intervals after its initial
+startup delay. Slow HTTPS work and collector execution do not block the main
+loop. The enrollment worker has a 60-second supervision deadline. The profile
+worker has a 600-second deadline. A timed-out worker is killed as a process
+group.
 
-## 9. IPsec and additional customer telemetry
+Individual RMS HTTPS requests use a 5-second connect timeout and a 15-second
+total timeout. Monotonic time is used for retry and scheduling decisions.
+Wall-clock time is used for certificate validity and observation timestamps.
 
-The supplied IPsec collector calls strongSwan `swanctl --list-conns` and
-`--list-sas`. It reports configured CHILD_SAs, their IKE/child states, and available
-traffic counters. A tunnel is UP only when its IKE SA is ESTABLISHED **and** its
-CHILD_SA is INSTALLED. It does not infer establishment from a PID file.
+On SIGINT or SIGTERM, the process exits its event loop, kills any worker,
+stops collection, closes the tunnel, disconnects MQTT, removes its control
+socket and status file, and exits. procd can then respawn it according to the
+init script policy.
 
-This collector supports the parsed swanctl output format; it is not a universal
-adapter for every IPsec implementation. It needs Lua, a supported JSON module,
-and swanctl. Publishing the script as a signed bundle and assigning a profile is
-required; merely shipping the file does not activate it.
+## 3. Files, sockets, and trust material
 
-For a new customer parameter, the team supplies an approved ubus query or script
-that emits bounded JSON, then creates a profile with the relevant field mappings
-and assigns it to the customer's devices. The agent picks it up on profile sync.
-There is no release-1 HTTP listener or local socket accepting unsolicited JSON
-from arbitrary services. A separate service can expose data for the scheduled
-collector to read.
+### Configuration
 
-## 10. Source map and verification boundary
+The UCI package is niseva and the normal configuration file is
+/etc/config/niseva. The installed default is in agent/files/niseva.config.
 
-| Source | Responsibility |
-|---|---|
-| `agent/src/main.c` | Startup, configuration, event loop, MQTT connection, worker scheduling |
-| `agent/src/bootstrap.c` | Board identity, private key, CSR, certificate validation, renewal/recovery |
-| `agent/src/runtime.c` | Verified HTTPS, bounded child capture, atomic writes, random IDs |
-| `agent/src/collectors.c` | Profile synchronization, signature checks, collector execution, envelopes |
-| `agent/src/telemetry.c` | RAM backlog, ACK matching, paced publication, heartbeat |
-| `agent/src/commands.c` | Device-topic and remote-session command validation |
-| `agent/src/tunnel.c` | One-session supervision and expiry timer |
-| `agent/src/tunnel_worker.c` | TLS/WebSocket transport, local HTTP proxy, rpcd sessions, PTY |
-| `agent/files/ipsec.lua` | strongSwan output collection and parsing |
-| `agent/tests/runtime_test.c` | Host queue, child timeout, output limit and HTTPS-only tests |
-| `collectors/ipsec/test.lua` | IPsec parser fixtures |
+The general section contains:
 
-The agent has been compiled for `mips_24kc`, and host tests cover queue limits,
-exact ACKs, hung collectors, oversized output, and selected IPsec parsing cases.
-See `agent/BUILD.md` for artifacts and build details.
+- mode: enabled, standby, or disabled
+- server: hosted or custom
+- hosted_hostname and hosted_port, or hostname and port for a custom server
+- enrollment_token
+- retry_initial, retry_initial_period, retry_regular, retry_standby
+- standby_after
 
-These checks do not yet establish actual-router flash usage including dependencies,
-peak RAM/CPU usage, live certificate recovery, bundle activation under power loss,
-LuCI compatibility, terminal cleanup, or fleet capacity. The larger RMS deployment
-and qualification work remains in progress.
+Provisioning adds or updates:
+
+- device_id
+- mqtt_host
+- mqtt_port
+- organization_name
+
+A successful claimed bootstrap atomically updates the relevant UCI options in
+one commit and clears enrollment_token. The token is therefore a bootstrap
+credential, not a permanent runtime credential.
+
+### Identity and certificates
+
+The persistent trust directory is /etc/xnet-rms:
+
+- /etc/xnet-rms/client.key: generated EC P-256 private key
+- /etc/xnet-rms/client.crt: device client certificate
+- /etc/xnet-rms/ca.crt: RMS CA certificate
+- /etc/xnet-rms/collectors: collector cache and active versions
+- /etc/xnet-rms/collector.pub: collector bundle verification key
+- /etc/xnet-rms/retry-state.json: retry and automatic-standby state
+- /etc/xnet-rms/installation-url: server binding lock
+
+The server binding lock prevents a provisioned device from silently switching
+to a different RMS server URL. Changing the server after enrollment requires
+explicit reprovisioning.
+
+### Runtime files and sockets
+
+The agent uses:
+
+- /var/run/niseva-rms.sock: Unix datagram control socket
+- /var/run/niseva-rms-status.json: main status snapshot
+- /var/run/niseva-rms-worker.json: last worker result while a worker runs
+- /tmp/xnet-rms-profiles.json: atomically replaced active profile document
+- /tmp/xnet-rms-collectors: temporary collector execution material
+- /tmp/rms-ssh: temporary authorized-key overlay for a remote SSH session
+
+The status file and runtime status JSON are mode 0600. The agent sets umask
+0077 before creating sensitive files.
+
+## 4. Startup sequence
+
+At startup the agent:
+
+1. Installs signal handlers and initializes OpenSSL randomness.
+2. Initializes uloop, libmosquitto, and the in-memory telemetry queue.
+3. Detects board identity and platform metadata.
+4. Loads UCI configuration and validates the configured server and retry values.
+5. Restores retry state if it belongs to the current configured mode.
+6. Creates and binds the Unix datagram control socket.
+7. Starts MQTT only when the device is fully provisioned and the mode is not
+   disabled.
+8. Starts the periodic main tick and independent heartbeat timer.
+
+The package default mode is enabled. That does not mean the agent can connect
+immediately: it still needs a valid clock, a valid server configuration, a
+device identity, a provisioned MQTT endpoint, client certificate, and CA trust.
+
+The agent generates a new boot_id for each process start. A service restart
+therefore creates a new telemetry run identity even when the Linux system has
+not rebooted.
+
+### Board identity detection
+
+Identity detection uses the following sources and fallbacks:
+
+- Serial and board data from /var/xnet_board_info.json
+- The configured UCI LAN bridge/device and
+  /sys/class/net/DEVICE/address for the MAC address
+- /tmp/sysinfo/model for the model
+- DISTRIB_ARCH from /etc/openwrt_release for architecture
+- /etc/openwrt_version for firmware version
+- A serial fallback of MAC-MAC_ADDRESS when no real serial is available
+- A random boot_id for the current process run
+
+An explicitly configured serial number takes precedence over detected data.
+There is no shared demo serial fallback.
+
+## 5. Configuration validation and operating modes
+
+The agent recognizes three configured modes:
+
+- enabled: enrollment, certificate maintenance, MQTT, profiles, collection, and
+  tunnels are allowed
+- standby: the agent remains installed but uses the standby retry schedule
+- disabled: no enrollment, MQTT, profile synchronization, collection, or tunnel
+  processing is performed
+
+Invalid UCI values make the configuration invalid. Hostnames are restricted to
+the accepted hostname character set, ports must be within the valid TCP range,
+and the server URL must use HTTPS.
+
+A device is considered provisioned only when all of the following are true:
+
+- configuration is valid
+- device_id has the accepted RMS identifier format
+- mqtt_host is present
+- mqtt_port is valid
+- client.crt exists
+- the certificate is not missing, expired, or otherwise due for recovery
+
+The CA and client key/certificate are still required for the MQTT TLS setup.
+A provisioned-looking UCI record alone is not sufficient.
+
+### Retry behavior
+
+Failures are persisted in retry-state.json. The first failure period uses
+retry_initial for retry_initial_period. Later failures use retry_regular.
+Configured standby mode uses retry_standby.
+
+Random jitter is added to retry delays. If enabled mode has failed continuously
+for standby_after, the agent enters automatic standby and persists that state.
+A successful MQTT connection clears the failure state and automatic standby
+state.
+
+The control command /usr/sbin/niseva-agent --connect sends a datagram to the
+control socket and causes an immediate connection/enrollment scheduling
+attempt when the mode and configuration permit it.
+
+## 6. First enrollment workflow
+
+The first enrollment is a challenge-response flow. The private key is generated
+locally and is not sent to RMS.
+
+### Preconditions
+
+The enrollment worker requires:
+
+- router wall clock at or after 2020
+- a usable serial number
+- a MAC address with the expected format
+- an EC P-256 key at /etc/xnet-rms/client.key, generated or reused locally
+- a valid HTTPS server URL and CA trust
+
+If a known identity key exists, the agent does not replace it silently. This
+prevents a restart or repeated check-in from changing the device identity.
+
+### Bootstrap sequence
+
+1. The agent creates a CSR from the local private key.
+2. It sends the device metadata, CSR, enrollment token, and agent version to
+   POST /api/v1/provision/bootstrap/challenge.
+3. RMS returns a challenge_id and a challenge message.
+4. The agent requires the exact message prefix
+   xnet-rms/bootstrap/v1:CHALLENGE_ID:
+5. The agent signs the complete challenge message with the local private key.
+6. It sends the challenge response to
+   POST /api/v1/provision/bootstrap/check-in.
+7. RMS returns the registration state and, after claim approval, the device ID,
+   client certificate, MQTT endpoint, MQTT port, and organization.
+8. The agent validates the returned certificate before installing it.
+9. The agent atomically installs the certificate and atomically commits the
+   provisioned UCI options, clearing the enrollment token.
+10. The agent reloads configuration, initializes MQTT, and schedules profile
+    synchronization.
+
+The registration response may indicate not_registered, awaiting_claim, or
+revoked. Those are recorded as registration states and retried according to
+the normal worker schedule; they are not treated as successful provisioning.
+
+### Certificate checks
+
+Before installation the agent checks that the certificate:
+
+- has the expected device ID in its identity
+- is valid for client authentication
+- chains to the configured CA
+- matches the locally held private key
+- has acceptable validity dates
+
+The certificate is written atomically so a power loss cannot leave a partial
+certificate file.
+
+## 7. Certificate renewal and recovery
+
+Certificate maintenance runs when the device is provisioned and the certificate
+is due.
+
+The current policy is:
+
+- more than 90 days remaining: no certificate operation
+- 90 days or less remaining: authenticated renewal
+- expired, missing, not-yet-valid, or invalid certificate: recovery flow
+
+### Renewal
+
+Renewal uses the current client certificate and mTLS:
+
+POST /api/v1/provision/renew
+
+The returned certificate undergoes the same identity, purpose, CA, and key-match
+checks before atomic replacement.
+
+### Recovery
+
+Recovery is used when the current certificate cannot authenticate:
+
+1. The agent requests a recovery challenge from
+   POST /api/v1/provision/challenge.
+2. It requires the message prefix
+   xnet-rms/recovery/v1:DEVICE_ID:
+3. It signs the challenge with the persistent local private key.
+4. It submits the signed response to POST /api/v1/provision/recover.
+5. It validates and atomically installs the replacement certificate.
+6. It reloads configuration and resumes MQTT connection attempts.
+
+Recovery preserves the device key. It does not generate a replacement identity
+key unless the original key is absent.
+
+## 8. MQTT connection and heartbeat
+
+Once provisioned, the agent creates a Mosquitto client whose client ID is the
+device_id. MQTT uses:
+
+- TLS with /etc/xnet-rms/ca.crt
+- the client certificate and private key
+- hostname verification
+- TLS 1.2
+- a 30-second keepalive
+- a maximum of four in-flight MQTT messages
+
+It subscribes to:
+
+- rms/v1/devices/DEVICE_ID/commands
+- rms/v1/devices/DEVICE_ID/acks
+
+The last-will message publishes {"status":"offline"} on the device heartbeat
+topic. On a successful connection the agent publishes an online heartbeat and
+clears the failure state. Disconnects record mqtt_disconnected and schedule a
+jittered reconnect.
+
+Heartbeat is independent of telemetry queue delivery. A healthy heartbeat does
+not prove that every telemetry record has been applied by RMS.
+
+## 9. Profile synchronization and collector bundles
+
+Profile synchronization is performed over authenticated HTTPS after the device
+is provisioned and periodically thereafter.
+
+### Profiles
+
+The agent requests:
+
+GET /api/v1/agent/profiles
+
+The response is validated and stored atomically at
+/tmp/xnet-rms-profiles.json. The implementation limits the number of profiles
+and validates each profile's interval, timeout, and maximum output size:
+
+- interval: 60 to 300 seconds
+- timeout: 1 to 15 seconds
+- maximum output: 256 to 32,768 bytes
+
+The implementation enforces the documented minimum and maximum bounds.
+
+A profile can describe a ubus collector, a signed script collector, or one of
+the explicitly allowlisted built-in collectors shipped with the agent.
+
+### Built-in device overview collector
+
+The `device_overview` built-in collector runs
+`/usr/libexec/xnet-rms/device-overview.sh`. It reads `/proc`, the active
+network interface counters, and the installed cellular ubus API. The collector
+prefers a discovered `cellulard-v2` modem and normalizes its information,
+signal, network, and bearer responses; when that API is unavailable, it falls
+back to the legacy `cellulard2` `cellular.status` response. It is fixed by
+collector ID and cannot execute a profile-supplied command. CPU and throughput
+are calculated from the previous sample stored under `/tmp`; the first sample
+therefore omits those rates. RSRP, SINR, and temperature are omitted when the
+router's modem or thermal subsystem does not expose them.
+
+### Built-in IPsec collector
+
+The `ipsec` built-in collector uses `/usr/libexec/xnet-rms/ipsec-vici` when the
+optional `niseva-agent-ipsec` package is installed. That executable loads
+strongSwan's VICI client library at runtime and issues only the read-only
+`list-conns` and `list-sas` requests. It emits one stable entity per configured
+connection/CHILD_SA, marks a tunnel `UP` only when the IKE state is
+`ESTABLISHED` and the CHILD_SA state is `INSTALLED`, and includes endpoints,
+selectors, algorithms, timers, byte counters, and packet counters. If the
+optional executable is absent, the agent retains the existing `ipsec.lua`
+fallback, which parses the allowlisted `swanctl` text output.
+
+### ubus collector
+
+A ubus profile invokes:
+
+/bin/ubus call OBJECT METHOD JSON_ARGUMENTS
+
+The command runs with bounded capture. Its stdout must be a complete JSON
+object or array within the configured output limit.
+
+### Signed script collector
+
+For a script bundle, the agent requests:
+
+GET /api/v1/agent/bundles/BUNDLE_ID?version=VERSION
+
+The agent validates:
+
+- returned bundle ID and version
+- script size, no more than 65,536 bytes
+- a shebang beginning with #!
+- SHA-256 digest
+- signature over the exact message:
+
+xnet-rms/collector/v1
+BUNDLE_ID
+VERSION
+SHA256
+
+The signature is checked using /etc/xnet-rms/collector.pub.
+
+The script is activated only after verification and a bounded activation run
+succeeds. Activation must exit 0 or 2 and emit complete JSON. The versioned
+file, current/previous/next links, and version metadata are updated atomically.
+The profile document is replaced only after all required profile and bundle
+operations succeed.
+
+An existing exact versioned file may be reused without downloading it again.
+The current code does not garbage-collect old bundle versions.
+
+## 10. Collector scheduling and result envelope
+
+Each profile gets a randomized initial delay between 0 and 29 seconds. The
+scheduler starts no more than one scheduled collector child at a time.
+
+The collector child:
+
+- receives the profile-defined timeout and output limit
+- has stdout captured through a nonblocking pipe
+- has stdin and stderr connected to /dev/null
+- runs in its own process group
+- is killed on timeout or output overflow
+- must produce one complete JSON object or array
+
+Exit and parse results map to:
+
+- exit 0 and valid JSON: status ok
+- exit 2: status unsupported
+- any other exit, malformed JSON, timeout, or overflow: status error
+
+The current execution boundary does not provide an OS sandbox or CPU/RAM
+quota. Collectors execute with the privileges of the agent service. Collector
+profiles and signed bundles must therefore be treated as privileged code.
+
+Every result is wrapped in an envelope containing:
+
+- schema_version
+- device_id
+- source_id
+- profile_id and profile_version
+- boot_id
+- sequence
+- observed_at
+- status
+- error
+- dropped
+- data
+
+The sequence starts at 1 for each agent process. observed_at is the collection
+start time. A service restart resets the in-memory sequence.
+
+## 11. Telemetry queue, publish, and application acknowledgment
+
+Telemetry is buffered in a FIFO linked queue in RAM.
+
+Queue rules:
+
+- total accounted queue memory is limited to 2 MiB
+- an individual payload cannot exceed 64 KiB
+- when the queue is full, the oldest records are dropped
+- the dropped count is included in later envelopes
+- one queue head is attempted at least every two seconds
+- MQTT QoS 1 is used for transport
+
+A record is removed only after the agent receives the matching RMS application
+acknowledgment. The ACK must match:
+
+- boot_id
+- source_id
+- exact sequence
+
+An MQTT PUBACK only confirms broker receipt. It is not the application ACK
+that confirms RMS has accepted the telemetry record.
+
+The queue, dropped count, and sequence are in memory. They are lost on agent
+restart. The heartbeat and current connection status do not reconstruct lost
+telemetry.
+
+## 12. MQTT remote commands
+
+The agent accepts commands only on:
+
+rms/v1/devices/DEVICE_ID/commands
+
+The implemented actions are:
+
+- open_session
+- close_session
+
+For open_session the agent validates:
+
+- session ID is present and valid
+- protocol is HTTP_LUCI, SSH_LUCI, or TERMINAL_SSH
+- the gateway URL uses HTTPS
+- expiration is in the future and no more than 900 seconds ahead
+- SSH_LUCI and TERMINAL_SSH include a public key
+
+Only one tunnel session is active at a time. A new session is rejected or
+replaces work according to the current tunnel state; it does not create
+multiple concurrent tunnels.
+
+close_session requests the current session to stop. Expiration, tunnel-worker
+exit, process errors, and agent shutdown also trigger cleanup.
+
+## 13. Tunnel establishment and cleanup
+
+The tunnel worker parses the gateway HTTPS host and port, waits for TCP
+connectivity, and creates a TLS 1.2 connection. It validates the gateway
+certificate against the RMS CA and expected gateway host or address, then
+performs a WebSocket upgrade at:
+
+/router/SESSION_ID
+
+The agent presents its client certificate and key for gateway authentication.
+
+A tunnel session creates temporary access state and removes it on every exit
+path:
+
+1. The agent creates a temporary SSH authorized-key overlay under
+   /tmp/rms-ssh/authorized_keys.
+2. It preserves the permanent
+   /etc/dropbear/authorized_keys content.
+3. If the Dropbear authorized-key path is absent, it creates an empty temporary
+   target so the bind mount is valid; an existing file is never replaced.
+4. It bind-mounts the temporary file over the Dropbear authorized-key path.
+5. If the bind mount fails, the session fails instead of continuing with an
+   uncertain access policy.
+6. On close, expiration, worker failure, or shutdown, it unmounts the overlay
+   and removes temporary files.
+
+### HTTP_LUCI
+
+The agent creates a local rpcd session through ubus, grants the required
+permissions, and proxies HTTP requests to local LuCI/rpcd services. Cookies
+and request/response data are carried in JSON WebSocket frames with base64
+bodies.
+
+Paths, headers, request body, and response body are bounded. The current body
+and response limits are approximately 1 MiB, and the local request timeout is
+10 seconds.
+
+The rpcd session is destroyed during tunnel cleanup.
+
+### SSH_LUCI
+
+The agent connects to local Dropbear at 127.0.0.1:22 and establishes an rpcd
+session for LuCI context. It sends a WebSocket text frame containing the LuCI
+session cookie, then proxies the raw SSH byte stream.
+
+### TERMINAL_SSH
+
+The agent connects to local Dropbear at 127.0.0.1:22 and proxies the raw SSH
+stream. The agent does not create the terminal PTY itself. The gateway/backend
+creates the operator shell and PTY side of the terminal session.
+
+The tunnel worker uses parent-death signaling and closes all local and remote
+sockets during cleanup.
+
+## 14. Status and operational inspection
+
+The following command prints the current status file:
+
+/usr/sbin/niseva-agent --status
+
+If the service is not running, it returns a compact agent_not_running result.
+When running, status includes fields such as:
+
+- mode and effective_mode
+- automatic_standby
+- registration_state
+- connection_state
+- last_error
+- serial_number, LAN MAC, model, firmware, and agent version
+- device_id and organization
+- last_success
+- next_connection_after
+- token_configured
+
+Useful local checks on a router include:
+
+~~~sh
+/etc/init.d/niseva-agent status
+logread -e niseva
+/usr/sbin/niseva-agent --status
+ls -l /etc/xnet-rms /var/run/niseva-rms-*.json
+ubus call system board
+uci show niseva
+~~~
+
+The Unix control socket is a datagram socket. A datagram received by the agent
+is a scheduling nudge; it is not a general command protocol and does not
+authenticate arbitrary payloads.
+
+## 15. Security and trust boundaries
+
+The design relies on the following boundaries:
+
+- The device private key stays on the router.
+- Bootstrap and recovery challenges must be signed by that key.
+- Enrollment and recovery use HTTPS with CA and hostname verification.
+- MQTT and tunnel connections use mTLS.
+- Collector bundles require a trusted public-key signature.
+- Provisioned server URL is locked to prevent silent server switching.
+- Temporary SSH authorization is overlaid only for the lifetime of a session.
+- WebSocket session expiry is bounded to 15 minutes at command validation.
+- Local collector and tunnel processes are bounded for output and time, but
+  collector code still runs with the agent's privileges.
+
+The outer gateway TLS path validates the RMS gateway. The local Dropbear SSH
+connection is to 127.0.0.1 and is used as the router-side transport endpoint;
+the agent does not use it as a second independent RMS identity channel.
+
+## 16. Failure and recovery matrix
+
+| Failure | Agent behavior |
+| --- | --- |
+| Invalid UCI or server URL | Marks configuration invalid and does not start connection work |
+| Clock before 2020 | Enrollment/PKI operation fails until time is corrected |
+| No serial or MAC | Enrollment worker fails and retries |
+| Awaiting claim or not registered | Records registration state and retries; does not install runtime identity |
+| Reprovisioning to a different server | Refuses due to installation-url lock |
+| MQTT disconnect | Records error, publishes no false healthy state, and reconnects with jitter |
+| Certificate near expiry | Runs renewal |
+| Missing/expired certificate | Runs challenge-based recovery |
+| Profile or bundle validation failure | Keeps the previously active profile document |
+| Collector timeout/overflow/malformed JSON | Emits an error or unsupported result; scheduler continues |
+| Telemetry queue full | Drops oldest records and reports the dropped count in later data |
+| Missing application ACK | Keeps the queue head and retries delivery |
+| Tunnel expiry or close command | Stops tunnel and removes temporary SSH overlay |
+| SSH bind mount failure | Refuses to start the session |
+| Worker deadline exceeded | Kills the worker process group and schedules retry |
+| Agent process exit | Cleans up local state; procd may respawn the service |
+
+## 17. Build, package, and qualification workflow
+
+### Host checks
+
+The CMake host build and runtime tests exercise bounded runtime behavior,
+telemetry queue rules, HTTPS URL restrictions, output capture, and SSH overlay
+cleanup. They do not prove operation on a specific OpenWrt router.
+
+Run the repository's host build and tests from the repository root using the
+project's normal CMake configuration. Also run:
+
+~~~sh
+git diff --check
+~~~
+
+### MIPS package build
+
+agent/scripts/build-mips.sh expects OPENWRT_ROOT to point at an OpenWrt
+checkout with the target-mips_24kc_musl staging/toolchain already available.
+It cross-compiles, strips, checks the resulting binary, and builds an IPK.
+
+The ImageBuilder or feed installation step must be target-specific. A successful
+host build or IPK creation does not prove that the package installs, that procd
+starts it, that the router's CA and UCI values are correct, or that live
+MQTT/HTTPS/WebSocket traffic succeeds.
+
+### Live qualification
+
+A meaningful router qualification should verify, on the target hardware:
+
+1. package installation and service startup
+2. board identity and clock detection
+3. bootstrap challenge and claim transition
+4. certificate installation and renewal/recovery
+5. MQTT online heartbeat and reconnect behavior
+6. profile download and signed bundle activation
+7. ubus and script collector envelopes
+8. queue behavior with application ACK and reconnect
+9. HTTP_LUCI, SSH_LUCI, and TERMINAL_SSH session cleanup
+10. reboot, certificate expiry/recovery, and power-loss file integrity
+
+A source review, host test, or dry validation must not be reported as hardware
+qualification.
+
+## 18. Current implementation boundaries
+
+The following are intentional or current limits visible in the code:
+
+- There is one active tunnel session per agent.
+- Telemetry is RAM-buffered and is lost on process restart.
+- Collector output, runtime, and count are bounded, but there is no complete
+  OS-level sandbox or resource quota for collector code.
+- Old collector bundle versions are not garbage-collected.
+- Terminal SSH forwarding does not create a local PTY; the gateway does.
+- Agent status is a local JSON snapshot, not a durable event log.
+- MQTT PUBACK is not application acceptance.
+- The UCI package version, runtime agent version, and MIPS packaging version are
+  currently inconsistent and should be unified before release.
+- agent/src/rollback.c contains a UCI watchdog helper, but the current MQTT
+  command path does not dispatch that rollback action; it should not be
+  described as an active remote command.
+
+## 19. Source-of-truth map
+
+| Concern | Main implementation |
+| --- | --- |
+| Main loop, modes, retries, status, MQTT | agent/src/main.c |
+| Board identity, bootstrap, renewal, recovery | agent/src/bootstrap.c |
+| HTTPS helpers and atomic files | agent/src/runtime.c |
+| Profiles and signed collectors | agent/src/collectors.c |
+| Telemetry queue and application ACKs | agent/src/telemetry.c |
+| MQTT command validation | agent/src/commands.c |
+| Session lifecycle and SSH overlay | agent/src/tunnel.c |
+| Gateway TLS/WebSocket and local proxies | agent/src/tunnel_worker.c |
+| Service packaging | agent/Makefile and agent/files/niseva.init |
+| Default UCI configuration | agent/files/niseva.config |
+| MIPS packaging helper | agent/scripts/build-mips.sh |
+| Host runtime tests | agent/tests/runtime_test.c |

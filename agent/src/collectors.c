@@ -15,9 +15,18 @@
 
 #define PROFILE_FILE "/tmp/xnet-rms-profiles.json"
 #define COLLECTOR_DIR RMS_PKI_DIR "/collectors"
-#define BUILTIN_DEVICE_OVERVIEW "/usr/libexec/xnet-rms/device-overview.sh"
-#define BUILTIN_IPSEC "/usr/libexec/xnet-rms/ipsec.lua"
-#define BUILTIN_MODBUS_HEALTH "/usr/libexec/xnet-rms/modbus-health.sh"
+/* Single source of truth for builtin collector ids: adding one here (plus
+ * installing the script and registering it in the Makefile/build-mips.sh
+ * packaging lists) is enough - no separate #define or id ladder to keep in
+ * sync. */
+static const struct {
+    const char *id;
+    const char *path;
+} BUILTIN_COLLECTORS[] = {
+    {"device_overview", "/usr/libexec/xnet-rms/device-overview.sh"},
+    {"ipsec", "/usr/libexec/xnet-rms/ipsec.lua"},
+    {"modbus_health", "/usr/libexec/xnet-rms/modbus-health.sh"},
+};
 
 static JSON_Value *profiles;
 static time_t loaded;
@@ -86,9 +95,14 @@ static JSON_Value *normalize_ubus_message(JSON_Value *data) {
 
 static const char *builtin_collector_path(const char *id) {
     if (!id) return NULL;
-    if (!strcmp(id, "device_overview")) return BUILTIN_DEVICE_OVERVIEW;
-    if (!strcmp(id, "ipsec")) return BUILTIN_IPSEC;
-    if (!strcmp(id, "modbus_health")) return BUILTIN_MODBUS_HEALTH;
+    for (size_t i = 0; i < sizeof(BUILTIN_COLLECTORS) / sizeof(BUILTIN_COLLECTORS[0]); i++) {
+        if (!strcmp(id, BUILTIN_COLLECTORS[i].id)) {
+            if (!strcmp(id, "ipsec") &&
+                access("/usr/libexec/xnet-rms/ipsec-vici", X_OK) == 0)
+                return "/usr/libexec/xnet-rms/ipsec-vici";
+            return BUILTIN_COLLECTORS[i].path;
+        }
+    }
     return NULL;
 }
 
@@ -97,7 +111,7 @@ int rms_preview_collect(const char *request_id, JSON_Array *collector_ids) {
     if (!rms_id(request_id) || count < 1 || count > 4 || preview_request[0]) return -1;
     for (size_t i = 0; i < count; i++) {
         const char *id = json_array_get_string(collector_ids, i);
-        if (!rms_id(id) || !builtin_collector_path(id)) return -1;
+        if (!builtin_collector_path(id)) return -1;
         snprintf(preview_sources[i], sizeof(preview_sources[i]), "%s", id);
     }
     snprintf(preview_request, sizeof(preview_request), "%s", request_id);
@@ -227,21 +241,30 @@ done:
     return rc;
 }
 
+/* Shared by emit() and emit_preview(): parses the collector's captured
+ * output and classifies it into a status/error/data trio, so both callers
+ * apply the same overflow/exit-code/invalid-JSON rules. */
+static JSON_Value *finalize_collector_result(int status, const char **state, const char **error) {
+    buffer[used] = 0;
+    JSON_Value *data = complete_json(buffer) ? json_parse_string(buffer) : NULL;
+    *state = "ok";
+    *error = "";
+    if (overflow || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || !data) {
+        *state = WIFEXITED(status) && WEXITSTATUS(status) == 2 ? "unsupported" : "error";
+        *error = overflow ? "collector timeout or output limit exceeded" : "collector failed or produced invalid JSON";
+        json_value_free(data);
+        data = json_value_init_object();
+    }
+    return data;
+}
 static void emit(int status) {
     JSON_Array *a = json_object_get_array(json_value_get_object(profiles), "profiles");
     JSON_Object *p = json_array_get_object(a, index_running);
     if (!p) return;
-    buffer[used] = 0;
-    JSON_Value *data = complete_json(buffer) ? json_parse_string(buffer) : NULL;
     const char *type = json_object_get_string(p, "type");
-    if (data && type && !strcmp(type, "ubus")) data = normalize_ubus_message(data);
-    const char *state = "ok", *error = "";
-    if (overflow || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || !data) {
-        state = WIFEXITED(status) && WEXITSTATUS(status) == 2 ? "unsupported" : "error";
-        error = overflow ? "collector timeout or output limit exceeded" : "collector failed or produced invalid JSON";
-        json_value_free(data);
-        data = json_value_init_object();
-    }
+    const char *state, *error;
+    JSON_Value *data = finalize_collector_result(status, &state, &error);
+    if (type && !strcmp(type, "ubus")) data = normalize_ubus_message(data);
     JSON_Value *v = json_value_init_object();
     JSON_Object *o = json_value_get_object(v);
     int64_t seq = telemetry_get_next_sequence();
@@ -269,15 +292,8 @@ static void emit(int status) {
 }
 
 static void emit_preview(int status) {
-    buffer[used] = 0;
-    JSON_Value *data = complete_json(buffer) ? json_parse_string(buffer) : NULL;
-    const char *state = "ok", *error = "";
-    if (overflow || !WIFEXITED(status) || WEXITSTATUS(status) != 0 || !data) {
-        state = WIFEXITED(status) && WEXITSTATUS(status) == 2 ? "unsupported" : "error";
-        error = overflow ? "collector timeout or output limit exceeded" : "collector failed or produced invalid JSON";
-        json_value_free(data);
-        data = json_value_init_object();
-    }
+    const char *state, *error;
+    JSON_Value *data = finalize_collector_result(status, &state, &error);
     JSON_Value *v = json_value_init_object();
     JSON_Object *o = json_value_get_object(v);
     json_object_set_string(o, "request_id", preview_request);
@@ -290,7 +306,11 @@ static void emit_preview(int status) {
     if (payload && g_mosq) {
         char topic[128];
         snprintf(topic, sizeof(topic), "rms/v1/devices/%s/previews", g_cfg.device_id);
-        mosquitto_publish(g_mosq, NULL, topic, strlen(payload), payload, 1, false);
+        /* Unlike emit(), previews aren't queued/retried - the backend times a
+         * request out and reports failure on its own, so a lost publish just
+         * needs to be visible rather than redelivered. */
+        if (mosquitto_publish(g_mosq, NULL, topic, strlen(payload), payload, 1, false) != MOSQ_ERR_SUCCESS)
+            fprintf(stderr, "[PREVIEW] publish failed for request %s\n", preview_request);
     }
     free(payload);
     json_value_free(v);
@@ -310,6 +330,67 @@ void rms_collect_stop(void) {
     profiles = NULL;
 }
 
+/* Shared fork/pipe/fd scaffolding for a collector child: stdout -> pipe,
+ * stdin/stderr -> /dev/null, every other fd closed, its own process group so
+ * a timeout can SIGKILL the whole group. `run` decides what actually
+ * executes and falls through to _exit(127) on failure, same as before this
+ * was split out of the preview and scheduled-profile spawn paths. */
+static pid_t spawn_collector_child(void (*run)(void *ctx), void *ctx, int *out_pipefd) {
+    int fds[2];
+    if (pipe(fds)) return -1;
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(fds[0]);
+        close(fds[1]);
+        return -1;
+    }
+    if (pid == 0) {
+        setpgid(0, 0);
+        dup2(fds[1], 1);
+        int null = open("/dev/null", O_RDWR);
+        if (null >= 0) {
+            dup2(null, 0);
+            dup2(null, 2);
+        }
+        for (int fd = 3; fd < 1024; fd++) close(fd);
+        run(ctx);
+        _exit(127);
+    }
+    setpgid(pid, pid);
+    close(fds[1]);
+    *out_pipefd = fds[0];
+    fcntl(*out_pipefd, F_SETFL, O_NONBLOCK);
+    return pid;
+}
+
+static void run_preview_child(void *ctx) {
+    const char *path = ctx;
+    execl(path, path, (char *)NULL);
+}
+
+static void run_profile_child(void *ctx) {
+    JSON_Object *p = ctx;
+    const char *type = json_object_get_string(p, "type");
+    if (type && !strcmp(type, "ubus")) {
+        const char *obj = json_object_get_string(p, "object");
+        const char *method = json_object_get_string(p, "method");
+        JSON_Value *args = json_object_get_value(p, "args");
+        char *arg = args ? json_serialize_to_string(args) : strdup("{}");
+        if (readonly_ubus(obj, method)) execl("/bin/ubus", "ubus", "call", obj, method, arg, (char *)NULL);
+    } else if (type && !strcmp(type, "script")) {
+        const char *id = json_object_get_string(p, "bundle_id");
+        int version = json_object_get_number(p, "bundle_version");
+        if (rms_id(id) && version > 0) {
+            char path[320];
+            snprintf(path, sizeof(path), "%s/%s/%d.sh", COLLECTOR_DIR, id, version);
+            execl(path, path, (char *)NULL);
+        }
+    } else if (type && !strcmp(type, "builtin")) {
+        const char *id = json_object_get_string(p, "collector_id");
+        const char *path = builtin_collector_path(id);
+        if (path) execl(path, path, (char *)NULL);
+    }
+}
 void rms_collect_tick(void) {
     long now = seconds();
     if (child > 0) {
@@ -372,33 +453,24 @@ void rms_collect_tick(void) {
             json_value_free(v);
         }
     }
-    if (preview_request[0] && preview_next < preview_count) {
+    /* Give an already-due scheduled profile priority over a preview request
+     * this tick, rather than letting a preview (up to 4 collectors x 10s)
+     * unconditionally stall telemetry that's already overdue. */
+    int profile_due = 0;
+    if (profiles && g_cfg.provisioned && time(NULL) >= 1577836800) {
+        JSON_Array *pa = json_object_get_array(json_value_get_object(profiles), "profiles");
+        for (size_t i = 0; i < json_array_get_count(pa); i++)
+            if (next_run[i] <= now) { profile_due = 1; break; }
+    }
+    if (preview_request[0] && preview_next < preview_count && !profile_due) {
         const char *path = builtin_collector_path(preview_sources[preview_next]);
-        int fds[2];
-        if (!path || pipe(fds)) return;
-        child = fork();
-        if (child < 0) {
-            close(fds[0]);
-            close(fds[1]);
+        if (!path) return;
+        pid_t pid = spawn_collector_child(run_preview_child, (void *)path, &pipefd);
+        if (pid < 0) {
             child = 0;
             return;
         }
-        if (child == 0) {
-            setpgid(0, 0);
-            dup2(fds[1], 1);
-            int null = open("/dev/null", O_RDWR);
-            if (null >= 0) {
-                dup2(null, 0);
-                dup2(null, 2);
-            }
-            for (int fd = 3; fd < 1024; fd++) close(fd);
-            execl(path, path, (char *)NULL);
-            _exit(127);
-        }
-        setpgid(child, child);
-        close(fds[1]);
-        pipefd = fds[0];
-        fcntl(pipefd, F_SETFL, O_NONBLOCK);
+        child = pid;
         used = 0;
         overflow = 0;
         limit = 32768;
@@ -421,50 +493,12 @@ void rms_collect_tick(void) {
             next_run[i] = now + 300;
             continue;
         }
-        int fds[2];
-        if (pipe(fds)) return;
-        child = fork();
-        if (child < 0) {
-            close(fds[0]);
-            close(fds[1]);
+        pid_t pid = spawn_collector_child(run_profile_child, (void *)p, &pipefd);
+        if (pid < 0) {
             child = 0;
             return;
         }
-        if (child == 0) {
-            setpgid(0, 0);
-            dup2(fds[1], 1);
-            int null = open("/dev/null", O_RDWR);
-            if (null >= 0) {
-                dup2(null, 0);
-                dup2(null, 2);
-            }
-            for (int fd = 3; fd < 1024; fd++) close(fd);
-            const char *type = json_object_get_string(p, "type");
-            if (type && !strcmp(type, "ubus")) {
-                const char *obj = json_object_get_string(p, "object");
-                const char *method = json_object_get_string(p, "method");
-                JSON_Value *args = json_object_get_value(p, "args");
-                char *arg = args ? json_serialize_to_string(args) : strdup("{}");
-                if (readonly_ubus(obj, method)) execl("/bin/ubus", "ubus", "call", obj, method, arg, (char *)NULL);
-            } else if (type && !strcmp(type, "script")) {
-                const char *id = json_object_get_string(p, "bundle_id");
-                int version = json_object_get_number(p, "bundle_version");
-                if (rms_id(id) && version > 0) {
-                    char path[320];
-                    snprintf(path, sizeof(path), "%s/%s/%d.sh", COLLECTOR_DIR, id, version);
-                    execl(path, path, (char *)NULL);
-                }
-            } else if (type && !strcmp(type, "builtin")) {
-                const char *id = json_object_get_string(p, "collector_id");
-                const char *path = builtin_collector_path(id);
-                if (path) execl(path, path, (char *)NULL);
-            }
-            _exit(127);
-        }
-        setpgid(child, child);
-        close(fds[1]);
-        pipefd = fds[0];
-        fcntl(pipefd, F_SETFL, O_NONBLOCK);
+        child = pid;
         used = 0;
         overflow = 0;
         deadline = now + timeout;

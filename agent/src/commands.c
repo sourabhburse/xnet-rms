@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdio.h>
+#include <syslog.h>
 void handle_mqtt_message(const struct mosquitto_message *msg){
  char topic[128];snprintf(topic,sizeof(topic),"rms/v1/devices/%s/commands",g_cfg.device_id);
  if(strcmp(topic,msg->topic))return;
@@ -15,11 +16,14 @@ void handle_mqtt_message(const struct mosquitto_message *msg){
    const char *id=json_object_get_string(o,"session_id"),*protocol=json_object_get_string(o,"protocol"),*url=json_object_get_string(o,"gateway_url");
    const char *pubkey=json_object_get_string(o,"public_key");
    double exp=json_object_get_number(o,"expires_at");time_t now=time(NULL);
-   if(rms_id(id)&&protocol&&url&&!strncmp(url,"https://",8)&&exp>now&&exp<=now+900&&(strcmp(protocol,"HTTP_LUCI")==0||strcmp(protocol,"SSH_LUCI")==0||strcmp(protocol,"TERMINAL_SSH")==0))open_reverse_tunnel(id,protocol,url,(int)(exp-now),pubkey);
+   if(rms_id(id)&&protocol&&url&&!strncmp(url,"https://",8)&&exp>now&&exp<=now+900&&(strcmp(protocol,"HTTP_LUCI")==0||strcmp(protocol,"SSH_LUCI")==0||strcmp(protocol,"TERMINAL_SSH")==0)){
+    if(open_reverse_tunnel(id,protocol,url,(int)(exp-now),pubkey)!=0)
+     syslog(LOG_ERR,"niseva tunnel: rejected open_session id=%s protocol=%s",id,protocol);
+   }
   } else if(action&&!strcmp(action,"extend_session")){
    const char *id=json_object_get_string(o,"session_id");
    double exp=json_object_get_number(o,"expires_at");time_t now=time(NULL);
-   if(rms_id(id)&&exp>now&&exp<=now+3600)extend_reverse_tunnel_session(id,(int)(exp-now));
+   if(rms_id(id)&&exp>now&&exp<=now+RMS_SESSION_EXTEND_MAX_SECS)extend_reverse_tunnel_session(id,(int)(exp-now));
   } else if(action&&!strcmp(action,"preview_collect")){
    const char *id=json_object_get_string(o,"request_id");
    JSON_Array *collectors=json_object_get_array(o,"collector_ids");

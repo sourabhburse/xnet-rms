@@ -77,7 +77,7 @@ An empty temperature must be reported as unavailable, never as zero.
 | WAN and internet | interface state, IPv4/IPv6, gateway, DNS reachability, latency, packet loss | outage and connectivity reports |
 | Cellular | signal, registration, operator, band, SIM, roaming, data connectivity, RX/TX counters | coverage, carrier, roaming, and data usage |
 | Ethernet and Wi-Fi | link state, speed, errors, radio state, channel, associated clients | LAN and access-point health |
-| VPN/IPsec | tunnel identity, state, peer, uptime, rekey time, bytes in/out, last error | per-tunnel availability and SLA reports |
+| VPN/IPsec | tunnel identity, IKE/CHILD state, peer endpoints, mode/protocol, uptime, rekey/lifetime timers, bytes and packets in/out | per-tunnel availability and SLA reports |
 | Storage and services | writable space, log pressure, service state, collector freshness | upgrade readiness and incident diagnosis |
 | Industrial optional | Modbus acquisition service state and boot-local communication-error count | gateway health and communication incident correlation |
 | Location | GPS fix, latitude, longitude, accuracy, fix age | fleet map where supported |

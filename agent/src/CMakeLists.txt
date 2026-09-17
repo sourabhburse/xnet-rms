@@ -19,6 +19,14 @@ add_executable(niseva-agent
     collectors.c
 )
 
+# Optional strongSwan VICI collector.  It is packaged separately and loads
+# libvici/libstrongswan at runtime, so the base agent remains independent of
+# the IPsec stack.
+add_executable(niseva-ipsec-collector
+    ipsec_vici.c
+    parson.c
+)
+
 target_link_libraries(niseva-agent
     ubox
     uci
@@ -28,8 +36,11 @@ target_link_libraries(niseva-agent
     curl
 )
 
+target_link_libraries(niseva-ipsec-collector dl)
+
 if(CMAKE_CROSSCOMPILING)
  set_target_properties(niseva-agent PROPERTIES SKIP_BUILD_RPATH TRUE INSTALL_RPATH "")
+ set_target_properties(niseva-ipsec-collector PROPERTIES SKIP_BUILD_RPATH TRUE INSTALL_RPATH "")
 endif()
 
 install(TARGETS niseva-agent DESTINATION /usr/sbin)

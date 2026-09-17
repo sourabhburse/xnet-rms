@@ -19,8 +19,11 @@ cmake -S "$root/agent/src" -B "$work/build" \
 cmake --build "$work/build" -j1
 cp "$work/build/niseva-agent" "$out/niseva-agent.debug"
 "$tool-strip" -o "$out/niseva-agent" "$out/niseva-agent.debug"
+cp "$work/build/niseva-ipsec-collector" "$out/niseva-ipsec-collector.debug"
+"$tool-strip" -o "$out/niseva-ipsec-collector" "$out/niseva-ipsec-collector.debug"
 "$tool-readelf" -h -l -d "$out/niseva-agent" > "$out/ELF.txt"
-if "$tool-readelf" -d "$out/niseva-agent" | grep -Eq 'RPATH|RUNPATH'; then
+"$tool-readelf" -d "$out/niseva-ipsec-collector" >> "$out/ELF.txt"
+if "$tool-readelf" -d "$out/niseva-agent" "$out/niseva-ipsec-collector" | grep -Eq 'RPATH|RUNPATH'; then
  echo "Refusing package with development library paths" >&2; exit 1
 fi
 pkg="$work/package"
@@ -35,7 +38,7 @@ printf '/etc/xnet-rms/\n/etc/config/niseva\n' > "$pkg/lib/upgrade/keep.d/niseva-
 printf '/etc/config/niseva\n' > "$pkg/CONTROL/conffiles"
 cat > "$pkg/CONTROL/control" <<'CONTROL'
 Package: niseva-agent
-Version: 2.3.0-1
+Version: 2.3.0-2
 Architecture: mips_24kc
 Maintainer: Niseva Engineering <support@niseva.com>
 Section: net
@@ -44,5 +47,21 @@ Depends: libc, libgcc1, libubox20191228, libuci20130104, libmosquitto-ssl, libcu
 Description: XNET RMS certificate identity, bounded collection and remote sessions
 CONTROL
 sh "$OPENWRT_ROOT/scripts/ipkg-build" -o 0 -g 0 "$pkg" "$out"
-(cd "$out" && sha256sum niseva-agent niseva-agent_2.3.0-1_mips_24kc.ipk > SHA256SUMS)
-echo "Built $out/niseva-agent_2.3.0-1_mips_24kc.ipk"
+
+ipsec_pkg="$work/ipsec-package"
+mkdir -p "$ipsec_pkg/CONTROL" "$ipsec_pkg/usr/libexec/xnet-rms"
+install -m 0755 "$out/niseva-ipsec-collector" "$ipsec_pkg/usr/libexec/xnet-rms/ipsec-vici"
+cat > "$ipsec_pkg/CONTROL/control" <<'CONTROL'
+Package: niseva-agent-ipsec
+Version: 2.3.0-2
+Architecture: mips_24kc
+Maintainer: Niseva Engineering <support@niseva.com>
+Section: net
+Priority: optional
+Depends: niseva-agent, strongswan-mod-vici
+Description: XNET RMS read-only strongSwan VICI IPsec collector
+CONTROL
+sh "$OPENWRT_ROOT/scripts/ipkg-build" -o 0 -g 0 "$ipsec_pkg" "$out"
+(cd "$out" && sha256sum niseva-agent niseva-ipsec-collector niseva-agent_2.3.0-2_mips_24kc.ipk niseva-agent-ipsec_2.3.0-2_mips_24kc.ipk > SHA256SUMS)
+echo "Built $out/niseva-agent_2.3.0-2_mips_24kc.ipk"
+echo "Built $out/niseva-agent-ipsec_2.3.0-2_mips_24kc.ipk"
