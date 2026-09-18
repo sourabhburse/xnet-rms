@@ -359,10 +359,11 @@ func (s *Core) snapshots(w http.ResponseWriter, r *http.Request) {
 // out the heartbeat interval to learn it has come back.
 //
 // A probe can only ever promote a device to ONLINE. Silence is not evidence of
-// absence - the agent may predate pingMinAgent, the broker may be unavailable,
-// or the router may simply be slower than pingTimeout - so an unanswered probe
-// falls back to the stored last_seen verdict rather than marking a live router
-// offline. "supported" tells the caller which of those it is looking at.
+// absence - an older agent may ignore the command, the broker may be
+// unavailable, or the router may simply be slower than pingTimeout - so an
+// unanswered probe falls back to the stored last_seen verdict rather than
+// marking a live router offline. "supported" is true when either the stored
+// version is known to support probes or this request received a fresh pong.
 func (s *Core) devicePing(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !s.scopedDevice(r, id) {
@@ -375,11 +376,11 @@ func (s *Core) devicePing(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "device not found")
 		return
 	}
-	supported := versionAtLeast(agentVersion, pingMinAgent)
 	answered := false
-	if !revoked && supported {
-		answered = s.PingDevice(id, agentVersion)
+	if !revoked {
+		answered = s.PingDevice(id)
 	}
+	supported := answered || versionAtLeast(agentVersion, pingMinAgent)
 	status := "OFFLINE"
 	switch {
 	case revoked:

@@ -68,10 +68,9 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 	// heartbeat topic, and the pong is only delivered once last_seen has been
 	// committed, so the authoritative check below re-reads it and stays the
 	// single source of truth. An unanswered probe changes nothing.
-	var probeAgent string
 	var probeOnline bool
-	if probeErr := s.DB.QueryRow("SELECT coalesce(agent_version,''),last_seen>now()-interval '180 seconds' AND NOT revoked FROM devices WHERE id=$1", req.DeviceID).Scan(&probeAgent, &probeOnline); probeErr == nil && !probeOnline {
-		s.PingDevice(req.DeviceID, probeAgent)
+	if probeErr := s.DB.QueryRow("SELECT last_seen>now()-interval '180 seconds' AND NOT revoked FROM devices WHERE id=$1", req.DeviceID).Scan(&probeOnline); probeErr == nil && !probeOnline {
+		s.PingDevice(req.DeviceID)
 	}
 	a := actor(r)
 	id, ticket := randomID(), secret()

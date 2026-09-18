@@ -120,8 +120,9 @@ func (s *Core) StartMQTT(ctx context.Context) (mqtt.Client, error) {
 // staying well inside a browser request.
 const pingTimeout = 3 * time.Second
 
-// pingMinAgent is the first agent release that answers a ping. Older routers
-// silently ignore the unknown command, so probing them only burns pingTimeout.
+// pingMinAgent is the first agent release known to answer a ping. It is used
+// only to describe support in the API response; it must not gate publication
+// because devices.agent_version can remain stale after an in-place upgrade.
 const pingMinAgent = "2.4.0"
 
 type pingWaiter struct {
@@ -149,10 +150,10 @@ func (s *Core) deliverPong(device, requestID string) {
 // PingDevice asks a router to prove it is reachable right now, returning true
 // only if it answered within pingTimeout.
 //
-// A false result means "could not confirm", never "offline": an agent older
-// than pingMinAgent never answers, the broker may be down, and a router on a
-// slow link may answer after pingTimeout. Callers must fall back to the stored
-// last_seen verdict rather than treating false as proof the router is gone.
+// A false result means "could not confirm", never "offline": an older agent
+// may ignore the command, the broker may be down, and a router on a slow link
+// may answer after pingTimeout. Callers must fall back to the stored last_seen
+// verdict rather than treating false as proof the router is gone.
 //
 // The router answers on its ordinary heartbeat topic, so a successful probe
 // also refreshes devices.last_seen through the handler above, and the pong is
@@ -161,8 +162,8 @@ func (s *Core) deliverPong(device, requestID string) {
 // Concurrent probes of one device are coalesced onto a single command. Without
 // that, a held-down refresh button or a handful of operators on the same page
 // would each publish to the router and each pin a goroutine for pingTimeout.
-func (s *Core) PingDevice(device, agentVersion string) bool {
-	if s.Publish == nil || !validID(device) || !versionAtLeast(agentVersion, pingMinAgent) {
+func (s *Core) PingDevice(device string) bool {
+	if s.Publish == nil || !validID(device) {
 		return false
 	}
 	waiter := &pingWaiter{device: device, done: make(chan struct{})}

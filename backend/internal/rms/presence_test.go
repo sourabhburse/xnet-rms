@@ -33,7 +33,7 @@ func captureProbe(s *Core, answerAs string) *string {
 func TestPingDeviceAnsweredProbeSucceeds(t *testing.T) {
 	s := &Core{}
 	captureProbe(s, testPingDevice)
-	if !s.PingDevice(testPingDevice, "2.4.0") {
+	if !s.PingDevice(testPingDevice) {
 		t.Fatal("expected an answered probe to report the router reachable")
 	}
 }
@@ -56,7 +56,7 @@ func TestPingDeviceIgnoresPongFromOtherDevice(t *testing.T) {
 		}
 		return errors.New("stop here rather than waiting out pingTimeout")
 	}
-	if s.PingDevice(testPingDevice, "2.4.0") {
+	if s.PingDevice(testPingDevice) {
 		t.Fatal("expected a pong from another device to be ignored")
 	}
 	if waiter == nil {
@@ -69,35 +69,16 @@ func TestPingDeviceIgnoresPongFromOtherDevice(t *testing.T) {
 	}
 }
 
-// An agent older than pingMinAgent silently ignores the command, so probing it
-// would only burn pingTimeout. It must not even be published.
-func TestPingDeviceSkipsAgentsThatCannotAnswer(t *testing.T) {
-	for _, version := range []string{"2.3.0", "1.0.0", ""} {
-		s := &Core{}
-		published := false
-		s.Publish = func(topic string, v any) error {
-			published = true
-			return nil
-		}
-		if s.PingDevice(testPingDevice, version) {
-			t.Fatalf("agent %q cannot answer a probe, but it was reported reachable", version)
-		}
-		if published {
-			t.Fatalf("agent %q cannot answer a probe, so none should be published", version)
-		}
-	}
-}
-
 func TestPingDeviceRejectsMalformedDeviceAndMissingBroker(t *testing.T) {
 	s := &Core{}
 	captureProbe(s, "")
 	for _, bad := range []string{"", "not-an-id", testPingDevice + "extra"} {
-		if s.PingDevice(bad, "2.4.0") {
+		if s.PingDevice(bad) {
 			t.Fatalf("expected device id %q to be rejected", bad)
 		}
 	}
 	offline := &Core{}
-	if offline.PingDevice(testPingDevice, "2.4.0") {
+	if offline.PingDevice(testPingDevice) {
 		t.Fatal("expected a probe to fail when MQTT is unavailable")
 	}
 }
@@ -107,7 +88,7 @@ func TestPingDeviceRejectsMalformedDeviceAndMissingBroker(t *testing.T) {
 func TestPingDeviceCleansUpWaiter(t *testing.T) {
 	s := &Core{}
 	seen := captureProbe(s, testPingDevice)
-	s.PingDevice(testPingDevice, "2.4.0")
+	s.PingDevice(testPingDevice)
 	if *seen == "" {
 		t.Fatal("expected the probe to carry a request id")
 	}
@@ -149,7 +130,7 @@ func TestPingDeviceJoinsInflightProbeInsteadOfPublishing(t *testing.T) {
 	leader.resolve()
 	s.pingInflight.Store(testPingDevice, leader)
 
-	if !s.PingDevice(testPingDevice, "2.4.0") {
+	if !s.PingDevice(testPingDevice) {
 		t.Fatal("expected the joining caller to observe the in-flight probe's pong")
 	}
 	if published != 0 {
@@ -179,7 +160,7 @@ func TestPingDeviceConcurrentProbesAreRaceFree(t *testing.T) {
 	const callers = 16
 	results := make(chan bool, callers)
 	for i := 0; i < callers; i++ {
-		go func() { results <- s.PingDevice(testPingDevice, "2.4.0") }()
+		go func() { results <- s.PingDevice(testPingDevice) }()
 	}
 	for i := 0; i < callers; i++ {
 		if !<-results {
@@ -201,13 +182,13 @@ func TestPingDeviceConcurrentProbesAreRaceFree(t *testing.T) {
 func TestPingDeviceReleasesInflightEntry(t *testing.T) {
 	s := &Core{}
 	captureProbe(s, testPingDevice)
-	if !s.PingDevice(testPingDevice, "2.4.0") {
+	if !s.PingDevice(testPingDevice) {
 		t.Fatal("expected the first probe to succeed")
 	}
 	if _, stuck := s.pingInflight.Load(testPingDevice); stuck {
 		t.Fatal("expected the in-flight entry to be released")
 	}
-	if !s.PingDevice(testPingDevice, "2.4.0") {
+	if !s.PingDevice(testPingDevice) {
 		t.Fatal("expected a second probe to succeed after the first released")
 	}
 }
