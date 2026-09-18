@@ -223,7 +223,7 @@ func decodeProductRevision(productID string, version int, schema, patterns, capa
 
 func loadProductRevision(tx *sql.Tx, productID string, version *int) (*productRevision, error) {
 	query := `SELECT pr.product_id,pr.version,pr.identity_schema,pr.model_patterns,pr.capabilities,
-                     default_profile_id,default_profile_version
+                     pr.default_profile_id,pr.default_profile_version
 	              FROM product_revisions pr JOIN products p ON p.id=pr.product_id
               WHERE pr.product_id=$1 AND NOT p.archived`
 	args := []any{productID}

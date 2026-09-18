@@ -55,6 +55,15 @@ func TestPostgresLifecycle(t *testing.T) {
 	if e = Partitions(db, now); e != nil {
 		t.Fatal(e)
 	}
+	resolverTx, e := db.Begin()
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, revision, identifiers, e := bootstrapProduct(resolverTx, "XE33 2S", map[string]string{"mac": "00:1E:42:16:B0:81"})
+	resolverTx.Rollback()
+	if e != nil || revision == nil || revision.Version != 1 || identifiers["mac"] != "00:1E:42:16:B0:81" {
+		t.Fatalf("bootstrap product resolution failed: err=%v revision=%+v identifiers=%v", e, revision, identifiers)
+	}
 	dir := t.TempDir()
 	if e = InitPKI(dir, []string{"localhost"}); e != nil {
 		t.Fatal(e)
