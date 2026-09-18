@@ -244,27 +244,27 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
   };
 
   return (
-    <div className="mx-auto flex max-w-[1240px] flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="-m-6 min-h-full bg-card">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-6 py-5">
         <div className="flex items-start gap-3">
-          <span className="grid size-9 place-items-center rounded-lg border border-accent bg-accent text-accent-foreground"><Users className="size-4" /></span>
+          <span className="grid size-9 place-items-center border border-accent bg-accent text-accent-foreground"><Users className="size-4" /></span>
           <div>
             <h1 className="font-display text-[22px] font-semibold text-balance">Users &amp; access</h1>
             <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground text-pretty">Manage accounts, enrollment credentials, and customer boundaries from one administrative workspace.</p>
           </div>
         </div>
         <Button variant="outline" size="sm" onClick={() => { onRefresh(); void loadScopedData(); }} disabled={loading}><span className={loading ? "size-3.5 animate-spin" : "size-3.5"}>↻</span>Refresh</Button>
-      </div>
+      </header>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
-        <TabsList>
-          <TabsTrigger value="accounts"><Users className="size-3.5" />Accounts</TabsTrigger>
-          {isSuperAdmin && <TabsTrigger value="tokens"><KeyRound className="size-3.5" />Enrollment tokens</TabsTrigger>}
-          {isSuperAdmin && <TabsTrigger value="customers"><Building2 className="size-3.5" />Customers</TabsTrigger>}
+        <TabsList className="h-auto w-full justify-start rounded-none border-b border-border bg-card px-6 py-0">
+          <TabsTrigger value="accounts" className="rounded-none border-b-2 border-transparent px-3 py-3 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"><Users className="size-3.5" />Accounts</TabsTrigger>
+          {isSuperAdmin && <TabsTrigger value="tokens" className="rounded-none border-b-2 border-transparent px-3 py-3 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"><KeyRound className="size-3.5" />Enrollment tokens</TabsTrigger>}
+          {isSuperAdmin && <TabsTrigger value="customers" className="rounded-none border-b-2 border-transparent px-3 py-3 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"><Building2 className="size-3.5" />Customers</TabsTrigger>}
         </TabsList>
 
-        <TabsContent value="accounts" className="mt-4 space-y-4">
-          <Card>
+        <TabsContent value="accounts" className="mt-0">
+          <Card className="rounded-none border-x-0 border-t-0 shadow-none">
             <CardHeader className="border-b border-border pb-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div><CardTitle>Accounts</CardTitle><CardDescription>Role assignments are enforced by the RMS API on every request.</CardDescription></div>
@@ -298,7 +298,7 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-none border-x-0 border-t-0 shadow-none">
             <CardHeader><CardTitle>Capability summary</CardTitle><CardDescription>Role capabilities are intentionally summarized here; the server remains the source of truth.</CardDescription></CardHeader>
             <CardContent className="p-0">
               <Table><TableHeader><TableRow><TableHead>Capability</TableHead><TableHead>Viewer</TableHead><TableHead>Operator</TableHead><TableHead>Org admin</TableHead><TableHead>Super admin</TableHead></TableRow></TableHeader><TableBody>
@@ -313,8 +313,8 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
           </Card>
         </TabsContent>
 
-        {isSuperAdmin && <TabsContent value="tokens" className="mt-4">
-          <Card>
+        {isSuperAdmin && <TabsContent value="tokens" className="mt-0">
+          <Card className="rounded-none border-x-0 border-t-0 shadow-none">
             <CardHeader className="border-b border-border pb-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle>Enrollment tokens</CardTitle><CardDescription>One-time credentials for router auto-enrollment. The token value is shown only after creation.</CardDescription></div><Button size="sm" onClick={() => { setCreatedToken(null); setTokenOpen(true); }}><KeyRound className="size-4" />Generate token</Button></div></CardHeader>
             <CardContent className="p-0"><div className="border-b border-border p-4">{isSuperAdmin && <ScopeSelect value={scope} organizations={customerList} onChange={setScope} />}</div><div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Name / purpose</TableHead><TableHead>Uses</TableHead><TableHead>Customer</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader><TableBody>
               {tokens.filter((token) => !scope || token.organization_id === scope).map((token) => <TableRow key={token.id}><TableCell><div className="font-medium">{token.name}</div><div className="font-mono text-[10px] text-muted-foreground">{token.id}</div></TableCell><TableCell className="font-mono text-[11px] tabular-nums">{token.used_count} / {token.max_uses ?? "∞"}</TableCell><TableCell className="text-[12px]">{customerNameFor(token.organization_id)}</TableCell><TableCell><Badge variant={token.revoked ? "secondary" : "ok"}>{token.revoked ? "Revoked" : "Active"}</Badge></TableCell><TableCell className="text-right"><Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={token.revoked} onClick={() => setRevokeTarget(token)}>Revoke</Button></TableCell></TableRow>)}
@@ -323,7 +323,7 @@ export default function UsersAccessView({ initialTab = "accounts", currentUser, 
           </Card>
         </TabsContent>}
 
-        {isSuperAdmin && <TabsContent value="customers" className="mt-4"><Card><CardHeader className="border-b border-border pb-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle>Customers</CardTitle><CardDescription>Tenant boundaries for users, devices, templates, and telemetry.</CardDescription></div><Button size="sm" onClick={() => setCustomerOpen(true)}><Building2 className="size-4" />Create customer</Button></div></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Customer</TableHead><TableHead>Organization ID</TableHead><TableHead className="text-right">Scope</TableHead></TableRow></TableHeader><TableBody>{customerList.map((organization) => <TableRow key={organization.id}><TableCell className="font-medium">{organization.name}</TableCell><TableCell className="font-mono text-[10.5px] text-muted-foreground">{organization.id}</TableCell><TableCell className="text-right"><Button variant="outline" size="sm" onClick={() => { setScope(organization.id); setActiveTab("accounts"); }}>Open scope</Button></TableCell></TableRow>)}{!customerList.length && <TableRow><TableCell colSpan={3} className="h-28 text-center text-xs text-muted-foreground">No customer organizations.</TableCell></TableRow>}</TableBody></Table></CardContent></Card></TabsContent>}
+        {isSuperAdmin && <TabsContent value="customers" className="mt-0"><Card className="rounded-none border-x-0 border-t-0 shadow-none"><CardHeader className="border-b border-border pb-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle>Customers</CardTitle><CardDescription>Tenant boundaries for users, devices, templates, and telemetry.</CardDescription></div><Button size="sm" onClick={() => setCustomerOpen(true)}><Building2 className="size-4" />Create customer</Button></div></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Customer</TableHead><TableHead>Organization ID</TableHead><TableHead className="text-right">Scope</TableHead></TableRow></TableHeader><TableBody>{customerList.map((organization) => <TableRow key={organization.id}><TableCell className="font-medium">{organization.name}</TableCell><TableCell className="font-mono text-[10.5px] text-muted-foreground">{organization.id}</TableCell><TableCell className="text-right"><Button variant="outline" size="sm" onClick={() => { setScope(organization.id); setActiveTab("accounts"); }}>Open scope</Button></TableCell></TableRow>)}{!customerList.length && <TableRow><TableCell colSpan={3} className="h-28 text-center text-xs text-muted-foreground">No customer organizations.</TableCell></TableRow>}</TableBody></Table></CardContent></Card></TabsContent>}
       </Tabs>
 
       <Dialog open={userOpen} onOpenChange={setUserOpen}><DialogContent><DialogHeader><DialogTitle>Add user account</DialogTitle><DialogDescription>Passwords must be between 12 and 72 characters. Choose the least-privileged role that fits the job.</DialogDescription></DialogHeader><div className="space-y-4"><div>{isSuperAdmin && <ScopeSelect value={scope} organizations={customerList} onChange={setScope} />}</div><div><label htmlFor="new-user-email" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Email address</label><Input id="new-user-email" type="email" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} placeholder="operator@customer.com" /></div><div><label htmlFor="new-user-password" className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Initial password</label><Input id="new-user-password" type="password" value={userForm.password} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} placeholder="12–72 characters" /></div><div><div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Role</div><div className="grid gap-2 sm:grid-cols-3">{roleOptions.map((option) => <button type="button" key={option.value} aria-pressed={userForm.role === option.value} onClick={() => setUserForm({ ...userForm, role: option.value })} className={`rounded-lg border p-3 text-left transition-colors ${userForm.role === option.value ? "border-primary bg-accent" : "border-border hover:bg-secondary/60"}`}><span className="block text-[12px] font-semibold">{option.label}</span><span className="mt-1 block text-[11px] text-muted-foreground">{option.description}</span></button>)}</div></div></div><DialogFooter><Button variant="outline" onClick={() => setUserOpen(false)} disabled={saving}>Cancel</Button><Button onClick={createUser} disabled={saving}>{saving ? "Creating…" : "Create user"}</Button></DialogFooter></DialogContent></Dialog>

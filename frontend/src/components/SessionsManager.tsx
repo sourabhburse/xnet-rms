@@ -4,9 +4,7 @@ import { toast } from "sonner";
 
 import { Device, SessionItem, User } from "../types";
 import { api, formatApiError } from "../api";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -23,9 +21,6 @@ const sessionLabel = (protocol: SessionItem["protocol"]) => {
   if (protocol === "TERMINAL_SSH") return "Terminal SSH";
   return protocol;
 };
-
-const sessionVariant = (protocol: SessionItem["protocol"]) =>
-  protocol === "TERMINAL_SSH" ? "accent" as const : "secondary" as const;
 
 function formatDate(value?: string | null) {
   if (!value) return "Not reported";
@@ -45,13 +40,11 @@ function remaining(expiresAt: string, now: number) {
 function Kpi({ label, value, note, tone = "neutral" }: { label: string; value: string | number; note: string; tone?: "neutral" | "ok" | "warn" }) {
   const valueClass = tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : "text-foreground";
   return (
-    <Card className="rounded-none border-0 border-b border-r border-border shadow-none last:border-r-0">
-      <CardContent className="p-4">
-        <div className="font-mono text-[11px] uppercase text-muted-foreground">{label}</div>
-        <div className={`mt-2 font-display text-[26px] font-semibold leading-none tabular-nums ${valueClass}`}>{value}</div>
-        <div className="mt-2 text-[12px] text-muted-foreground">{note}</div>
-      </CardContent>
-    </Card>
+    <div className="border-b border-r border-border p-5 last:border-r-0">
+      <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{label}</div>
+      <div className={`mt-2 font-display text-[28px] font-semibold leading-none tabular-nums ${valueClass}`}>{value}</div>
+      <div className="mt-2 text-[12px] text-muted-foreground">{note}</div>
+    </div>
   );
 }
 
@@ -104,8 +97,8 @@ export default function SessionsManager({ user, sessions, devices, loading, onRe
   };
 
   return (
-    <div className="mx-auto flex max-w-[1280px] flex-col gap-4">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+    <div className="-m-6 min-h-full bg-card">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-6 py-5">
         <div>
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase text-primary"><Cable className="size-3.5" />Remote access</div>
           <h1 className="mt-1 font-display text-[22px] font-semibold text-balance">Sessions</h1>
@@ -114,21 +107,22 @@ export default function SessionsManager({ user, sessions, devices, loading, onRe
         <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}><RefreshCw className="size-3.5" />Refresh</Button>
       </header>
 
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-        <div className="flex items-center gap-1 border-b border-border px-4 pt-2">
-          <span className="border-b-2 border-primary px-3 py-2 text-[13px] font-medium text-primary">Active sessions <span className="ml-1 font-mono text-[11px] tabular-nums">{activeSessions.length}</span></span>
-          <span className="px-3 py-2 text-[13px] text-muted-foreground">History unavailable</span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3">
-          <Kpi label="Active now" value={activeSessions.length} note="Across the selected scope" tone="ok" />
-          <Kpi label="Expiring soon" value={expiringSoon} note="Within the next five minutes" tone={expiringSoon ? "warn" : "neutral"} />
-          <Kpi label="Capacity" value={`${activeSessions.length} / 25`} note={`${terminalCount} terminal · ${activeSessions.length - terminalCount} LuCI`} />
-        </div>
+      <div className="flex items-center border-b border-border px-6">
+        <span className="border-b-2 border-primary px-3 py-3 text-[13px] font-medium text-primary">Active sessions <span className="ml-1 font-mono text-[11px] tabular-nums">{activeSessions.length}</span></span>
+        <span className="px-3 py-3 text-[13px] text-muted-foreground">Closed history unavailable</span>
       </div>
 
-      <Card>
-        <CardHeader className="border-b border-border"><CardTitle>Active connections</CardTitle><CardDescription>Sessions expire automatically after 15 minutes and can be extended up to one hour.</CardDescription></CardHeader>
-        <CardContent className="p-0">
+      <div className="grid grid-cols-1 sm:grid-cols-3">
+        <Kpi label="Active now" value={activeSessions.length} note="Across the selected scope" tone="ok" />
+        <Kpi label="Expiring soon" value={expiringSoon} note="Within the next five minutes" tone={expiringSoon ? "warn" : "neutral"} />
+        <Kpi label="Capacity" value={`${activeSessions.length} / 25`} note={`${terminalCount} terminal · ${activeSessions.length - terminalCount} LuCI`} />
+      </div>
+
+      <section>
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border px-6 py-4">
+          <div><h2 className="text-[14px] font-semibold">Active connections</h2><p className="mt-1 text-[12px] text-muted-foreground">Sessions expire after 15 minutes and can be extended up to one hour.</p></div>
+          <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">Live access ledger</span>
+        </div>
           {loading ? (
             <div className="space-y-3 p-5" aria-busy="true" aria-label="Loading sessions">{[1, 2, 3].map((row) => <div key={row} className="grid grid-cols-4 gap-4"><span className="h-4 rounded bg-secondary" /><span className="h-4 rounded bg-secondary" /><span className="h-4 rounded bg-secondary" /><span className="h-4 rounded bg-secondary" /></div>)}</div>
           ) : activeSessions.length ? (
@@ -140,7 +134,7 @@ export default function SessionsManager({ user, sessions, devices, loading, onRe
                   const expiry = new Date(session.expires_at).getTime();
                   const isExpiring = Number.isFinite(expiry) && expiry - now > 0 && expiry - now <= 5 * 60000;
                   return <TableRow key={session.id} className={isExpiring ? "border-l-2 border-l-warn-rail bg-warn-bg/20" : "border-l-2 border-l-ok-rail"}>
-                    <TableCell><Badge variant={sessionVariant(session.protocol)} className="font-normal">{session.protocol === "TERMINAL_SSH" ? <TerminalSquare className="size-3" /> : <Cable className="size-3" />}{sessionLabel(session.protocol)}</Badge></TableCell>
+                    <TableCell><span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground">{session.protocol === "TERMINAL_SSH" ? <TerminalSquare className="size-3.5 text-primary" /> : <Cable className="size-3.5 text-primary" />}{sessionLabel(session.protocol)}</span></TableCell>
                     <TableCell><div className="flex items-center gap-2"><span className="grid size-7 place-items-center rounded-md bg-accent text-accent-foreground"><Router className="size-3.5" /></span><span className="min-w-0"><span className="block max-w-[220px] truncate text-[13px] font-medium">{device?.name || device?.serial_number || "Unknown device"}</span><span className="block font-mono text-[10.5px] text-muted-foreground">{device?.serial_number || session.device_id}</span></span></div></TableCell>
                     <TableCell className="font-mono text-[11px]">{session.user_id === user.id ? "You" : session.user_id.slice(0, 12)}</TableCell>
                     <TableCell className="font-mono text-[11px] text-muted-foreground">{formatDate(session.created_at)}</TableCell>
@@ -153,10 +147,9 @@ export default function SessionsManager({ user, sessions, devices, loading, onRe
           ) : (
             <div className="flex min-h-44 flex-col items-center justify-center gap-2 p-6 text-center"><span className="grid size-10 place-items-center rounded-full bg-secondary"><Cable className="size-5 text-muted-foreground" /></span><p className="text-[13px] font-medium">No active sessions</p><p className="max-w-sm text-xs text-muted-foreground text-pretty">Open LuCI or terminal from an online device to create a secure, time-limited session.</p></div>
           )}
-        </CardContent>
-      </Card>
+      </section>
 
-      <div className="flex items-start gap-2 rounded-lg border border-border bg-secondary/40 px-3.5 py-3 text-[12px] text-muted-foreground"><ExternalLink className="mt-0.5 size-3.5 shrink-0" /><span>Closed-session history and close outcomes are not exposed by the current sessions API, so no historical rows are shown here.</span></div>
+      <div className="flex items-start gap-2 border-t border-border bg-secondary/25 px-6 py-3 text-[12px] text-muted-foreground"><ExternalLink className="mt-0.5 size-3.5 shrink-0" /><span>Closed-session history and close outcomes are not exposed by the current sessions API, so no historical rows are shown here.</span></div>
       <ConfirmDialog open={!!closeTarget} onOpenChange={(open) => !open && setCloseTarget(null)} title="Terminate remote session?" description="The active router connection will be dropped immediately." confirmLabel="Close session" onConfirm={closeSession} />
     </div>
   );
