@@ -57,6 +57,22 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "device not found")
 		return
 	}
+	// A router that reconnected moments ago can still be most of a heartbeat
+	// interval away from proving it, and heartbeats are QoS 0 so one can simply
+	// be lost - both leave an operator staring at "device unavailable" for a
+	// router that is right there. Probe before opening the transaction, never
+	// inside it: createSession takes a global advisory lock, so blocking on a
+	// round trip in there would serialize every other session-open behind it.
+	//
+	// The result is deliberately ignored. A router answers on its ordinary
+	// heartbeat topic, and the pong is only delivered once last_seen has been
+	// committed, so the authoritative check below re-reads it and stays the
+	// single source of truth. An unanswered probe changes nothing.
+	var probeAgent string
+	var probeOnline bool
+	if probeErr := s.DB.QueryRow("SELECT coalesce(agent_version,''),last_seen>now()-interval '180 seconds' AND NOT revoked FROM devices WHERE id=$1", req.DeviceID).Scan(&probeAgent, &probeOnline); probeErr == nil && !probeOnline {
+		s.PingDevice(req.DeviceID, probeAgent)
+	}
 	a := actor(r)
 	id, ticket := randomID(), secret()
 	expires := time.Now().Add(initialSessionTTL)

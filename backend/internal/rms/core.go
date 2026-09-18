@@ -26,6 +26,9 @@ type Core struct {
 	Publish  func(string, any) error
 	sshKeys  sync.Map
 	previews sync.Map
+	pings    sync.Map
+	// Keyed by device, so concurrent probes of one router share a command.
+	pingInflight sync.Map
 }
 type Actor struct {
 	ID      string `json:"id"`
@@ -113,6 +116,7 @@ func (s *Core) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/auth/me", s.protect("VIEWER", func(w http.ResponseWriter, r *http.Request) { output(w, 200, actor(r)) }))
 	m.HandleFunc("GET /api/v1/devices", s.protect("VIEWER", s.listDevices))
 	m.HandleFunc("GET /api/v1/devices/{id}/snapshots", s.protect("VIEWER", s.snapshots))
+	m.HandleFunc("POST /api/v1/devices/{id}/ping", s.protect("OPERATOR", s.devicePing))
 	m.HandleFunc("GET /api/v1/devices/{id}/history", s.protect("VIEWER", s.history))
 	m.HandleFunc("GET /api/v1/reports/telemetry", s.protect("VIEWER", s.telemetryReport))
 	m.HandleFunc("POST /api/v1/reports/telemetry/query", s.protect("VIEWER", s.telemetryReportQuery))
@@ -350,6 +354,40 @@ func (s *Core) snapshots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.rows(w, `SELECT row_to_json(t) FROM (SELECT c.*,p.definition FROM current_snapshots c JOIN profiles p ON p.id=c.profile_id AND p.version=c.profile_version WHERE device_id=$1) t`, r.PathValue("id"))
+}
+// devicePing probes one router on demand so an operator does not have to wait
+// out the heartbeat interval to learn it has come back.
+//
+// A probe can only ever promote a device to ONLINE. Silence is not evidence of
+// absence - the agent may predate pingMinAgent, the broker may be unavailable,
+// or the router may simply be slower than pingTimeout - so an unanswered probe
+// falls back to the stored last_seen verdict rather than marking a live router
+// offline. "supported" tells the caller which of those it is looking at.
+func (s *Core) devicePing(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !s.scopedDevice(r, id) {
+		fail(w, 404, "device not found")
+		return
+	}
+	var agentVersion string
+	var online, revoked bool
+	if e := s.DB.QueryRow("SELECT coalesce(agent_version,''),last_seen>now()-interval '180 seconds',revoked FROM devices WHERE id=$1", id).Scan(&agentVersion, &online, &revoked); e != nil {
+		fail(w, 404, "device not found")
+		return
+	}
+	supported := versionAtLeast(agentVersion, pingMinAgent)
+	answered := false
+	if !revoked && supported {
+		answered = s.PingDevice(id, agentVersion)
+	}
+	status := "OFFLINE"
+	switch {
+	case revoked:
+		status = "REVOKED"
+	case answered || online:
+		status = "ONLINE"
+	}
+	output(w, 200, map[string]any{"device_id": id, "status": status, "answered": answered, "supported": supported})
 }
 func (s *Core) history(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

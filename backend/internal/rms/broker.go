@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"log"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -44,7 +45,8 @@ func (s *Core) StartMQTT(ctx context.Context) (mqtt.Client, error) {
 						}
 					case "heartbeat":
 						var beat struct {
-							Status string `json:"status"`
+							Status    string `json:"status"`
+							RequestID string `json:"request_id"`
 						}
 						if json.Unmarshal(p.data, &beat) == nil {
 							now := time.Now().UTC()
@@ -57,6 +59,11 @@ func (s *Core) StartMQTT(ctx context.Context) (mqtt.Client, error) {
 								SELECT id,date_trunc('hour',$2::timestamptz),$3 FROM touched
 								ON CONFLICT(device_id,hour) DO UPDATE
 								SET seen_minutes=presence_hours.seen_minutes | EXCLUDED.seen_minutes`, id, now, mask)
+								// Only after last_seen is committed, so a caller
+								// woken by this pong cannot re-read a stale row.
+								if beat.RequestID != "" {
+									s.deliverPong(id, beat.RequestID)
+								}
 							} else if beat.Status == "offline" {
 								s.DB.Exec(`WITH touched AS (
 									UPDATE devices SET last_seen=$2-interval '180 seconds' WHERE id=$1 AND NOT revoked AND last_seen>$2-interval '180 seconds' RETURNING id
@@ -106,4 +113,84 @@ func (s *Core) StartMQTT(ctx context.Context) (mqtt.Client, error) {
 	c.Connect()
 	go func() { <-ctx.Done(); c.Disconnect(500) }()
 	return c, nil
+}
+
+// pingTimeout bounds how long a caller waits for a router to answer a liveness
+// probe. Three seconds covers a cellular round trip with room to spare while
+// staying well inside a browser request.
+const pingTimeout = 3 * time.Second
+
+// pingMinAgent is the first agent release that answers a ping. Older routers
+// silently ignore the unknown command, so probing them only burns pingTimeout.
+const pingMinAgent = "2.4.0"
+
+type pingWaiter struct {
+	device string
+	done   chan struct{}
+	once   sync.Once
+}
+
+// resolve wakes every caller joined to this probe. It closes rather than sends
+// so late and duplicate pongs are harmless, and never blocks the MQTT worker.
+func (w *pingWaiter) resolve() { w.once.Do(func() { close(w.done) }) }
+
+// deliverPong wakes the callers waiting on requestID. The device is checked so
+// a pong cannot be attributed to a probe of a different router.
+func (s *Core) deliverPong(device, requestID string) {
+	v, ok := s.pings.Load(requestID)
+	if !ok {
+		return
+	}
+	if waiter, ok := v.(*pingWaiter); ok && waiter.device == device {
+		waiter.resolve()
+	}
+}
+
+// PingDevice asks a router to prove it is reachable right now, returning true
+// only if it answered within pingTimeout.
+//
+// A false result means "could not confirm", never "offline": an agent older
+// than pingMinAgent never answers, the broker may be down, and a router on a
+// slow link may answer after pingTimeout. Callers must fall back to the stored
+// last_seen verdict rather than treating false as proof the router is gone.
+//
+// The router answers on its ordinary heartbeat topic, so a successful probe
+// also refreshes devices.last_seen through the handler above, and the pong is
+// only delivered once that write has committed.
+//
+// Concurrent probes of one device are coalesced onto a single command. Without
+// that, a held-down refresh button or a handful of operators on the same page
+// would each publish to the router and each pin a goroutine for pingTimeout.
+func (s *Core) PingDevice(device, agentVersion string) bool {
+	if s.Publish == nil || !validID(device) || !versionAtLeast(agentVersion, pingMinAgent) {
+		return false
+	}
+	waiter := &pingWaiter{device: device, done: make(chan struct{})}
+	timer := time.NewTimer(pingTimeout)
+	defer timer.Stop()
+	if existing, inflight := s.pingInflight.LoadOrStore(device, waiter); inflight {
+		joined, ok := existing.(*pingWaiter)
+		if !ok {
+			return false
+		}
+		select {
+		case <-joined.done:
+			return true
+		case <-timer.C:
+			return false
+		}
+	}
+	defer s.pingInflight.Delete(device)
+	requestID := randomID()
+	s.pings.Store(requestID, waiter)
+	defer s.pings.Delete(requestID)
+	if s.Publish("rms/v1/devices/"+device+"/commands", map[string]any{"action": "ping", "request_id": requestID}) != nil {
+		return false
+	}
+	select {
+	case <-waiter.done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }

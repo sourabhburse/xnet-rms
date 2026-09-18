@@ -3,7 +3,7 @@
 set -eu
 : "${OPENWRT_ROOT:?Set the existing OpenWrt source or SDK root}"
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
-out=${1:-"$root/artifacts/agent-2.3.0"}
+out=${1:-"$root/artifacts/agent-2.4.0"}
 mkdir -p "$out"
 out=$(CDPATH= cd -- "$out" && pwd)
 stage="$OPENWRT_ROOT/staging_dir/target-mips_24kc_musl"
@@ -38,7 +38,7 @@ printf '/etc/xnet-rms/\n/etc/config/niseva\n' > "$pkg/lib/upgrade/keep.d/niseva-
 printf '/etc/config/niseva\n' > "$pkg/CONTROL/conffiles"
 cat > "$pkg/CONTROL/control" <<'CONTROL'
 Package: niseva-agent
-Version: 2.3.0-2
+Version: 2.4.0-1
 Architecture: mips_24kc
 Maintainer: Niseva Engineering <support@niseva.com>
 Section: net
@@ -53,7 +53,7 @@ mkdir -p "$ipsec_pkg/CONTROL" "$ipsec_pkg/usr/libexec/xnet-rms"
 install -m 0755 "$out/niseva-ipsec-collector" "$ipsec_pkg/usr/libexec/xnet-rms/ipsec-vici"
 cat > "$ipsec_pkg/CONTROL/control" <<'CONTROL'
 Package: niseva-agent-ipsec
-Version: 2.3.0-2
+Version: 2.4.0-1
 Architecture: mips_24kc
 Maintainer: Niseva Engineering <support@niseva.com>
 Section: net
@@ -62,6 +62,6 @@ Depends: niseva-agent, strongswan-mod-vici
 Description: XNET RMS read-only strongSwan VICI IPsec collector
 CONTROL
 sh "$OPENWRT_ROOT/scripts/ipkg-build" -o 0 -g 0 "$ipsec_pkg" "$out"
-(cd "$out" && sha256sum niseva-agent niseva-ipsec-collector niseva-agent_2.3.0-2_mips_24kc.ipk niseva-agent-ipsec_2.3.0-2_mips_24kc.ipk > SHA256SUMS)
-echo "Built $out/niseva-agent_2.3.0-2_mips_24kc.ipk"
-echo "Built $out/niseva-agent-ipsec_2.3.0-2_mips_24kc.ipk"
+(cd "$out" && sha256sum niseva-agent niseva-ipsec-collector niseva-agent_2.4.0-1_mips_24kc.ipk niseva-agent-ipsec_2.4.0-1_mips_24kc.ipk > SHA256SUMS)
+echo "Built $out/niseva-agent_2.4.0-1_mips_24kc.ipk"
+echo "Built $out/niseva-agent-ipsec_2.4.0-1_mips_24kc.ipk"

@@ -10,7 +10,7 @@
 #include <time.h>
 #include "parson.h"
 
-#define AGENT_VERSION "2.3.0"
+#define AGENT_VERSION "2.4.0"
 #define DEFAULT_SERVER ""
 #define DEFAULT_MQTT_HOST ""
 #define DEFAULT_MQTT_PORT 8883
@@ -79,6 +79,9 @@ char *sign_challenge_message(const char *message);
 // MQTT & Telemetry
 int init_mqtt(void);
 void send_heartbeat(struct uloop_timeout *t);
+/* Answers an RMS liveness probe by publishing a heartbeat tagged with the
+ * request id, so the server can attribute the reply to its own probe. */
+void send_pong(const char *request_id);
 void collect_and_send_telemetry(struct uloop_timeout *t);
 void handle_telemetry_ack(const char *payload);
 int rms_preview_collect(const char *request_id, JSON_Array *collector_ids);

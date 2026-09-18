@@ -1,4 +1,4 @@
-# Agent 2.3.0-2
+# Agent 2.4.0-1
 
 Build from the repository root using the existing OpenWrt staging libraries and
 GCC 7.5.0 MIPS musl toolchain. The script reads that tree and writes only to a
@@ -8,7 +8,7 @@ temporary build directory and the requested artifact directory:
 OPENWRT_ROOT=/home/sourabh/openwrt-19.07 sh agent/scripts/build-mips.sh
 ```
 
-Outputs are in `artifacts/agent-2.3.0/`: base and optional IPsec IPKs, stripped
+Outputs are in `artifacts/agent-2.4.0/`: base and optional IPsec IPKs, stripped
 and unstripped binaries, ELF metadata and SHA256 checksums. The IPKs are
 assembled with OpenWrt's `ipkg-build` after cross-compilation; this is not a
 complete firmware build. Install `niseva-agent-ipsec` only on products that

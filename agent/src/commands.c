@@ -24,6 +24,9 @@ void handle_mqtt_message(const struct mosquitto_message *msg){
    const char *id=json_object_get_string(o,"session_id");
    double exp=json_object_get_number(o,"expires_at");time_t now=time(NULL);
    if(rms_id(id)&&exp>now&&exp<=now+RMS_SESSION_EXTEND_MAX_SECS)extend_reverse_tunnel_session(id,(int)(exp-now));
+  } else if(action&&!strcmp(action,"ping")){
+   const char *id=json_object_get_string(o,"request_id");
+   if(id)send_pong(id);
   } else if(action&&!strcmp(action,"preview_collect")){
    const char *id=json_object_get_string(o,"request_id");
    JSON_Array *collectors=json_object_get_array(o,"collector_ids");

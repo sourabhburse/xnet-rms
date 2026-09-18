@@ -178,6 +178,18 @@ void handle_telemetry_ack(const char *payload) {
 size_t telemetry_queue_bytes(void){return g_queue_bytes;}
 void send_heartbeat(struct uloop_timeout *t){
     if(g_mosq){char topic[128];snprintf(topic,sizeof(topic),"rms/v1/devices/%s/heartbeat",g_cfg.device_id);const char *p="{\"status\":\"online\"}";mosquitto_publish(g_mosq,NULL,topic,strlen(p),p,0,false);}
-    uloop_timeout_set(t,60000);
+    /* heartbeat_interval is validated to 10-60s when the config is loaded;
+     * fall back to 60s if it was never populated. */
+    unsigned interval=g_cfg.heartbeat_interval?g_cfg.heartbeat_interval:60;
+    uloop_timeout_set(t,(int)interval*1000);
+}
+/* Published at QoS 1, unlike the periodic heartbeat: a probe is a one-shot
+ * reply the server is actively waiting on, so it must not be dropped. */
+void send_pong(const char *request_id){
+    if(!g_mosq||!rms_id(request_id))return;
+    char topic[128],payload[128];
+    snprintf(topic,sizeof(topic),"rms/v1/devices/%s/heartbeat",g_cfg.device_id);
+    snprintf(payload,sizeof(payload),"{\"status\":\"online\",\"request_id\":\"%s\"}",request_id);
+    mosquitto_publish(g_mosq,NULL,topic,strlen(payload),payload,1,false);
 }
 void collect_and_send_telemetry(struct uloop_timeout *t){rms_collect_tick();uloop_timeout_set(t,100);}

@@ -201,6 +201,7 @@ export default function DeviceDetail({
 }: DeviceDetailProps) {
   const [snapshots, setSnapshots] = useState<SnapshotSource[]>([]);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
+  const [probing, setProbing] = useState(false);
   const [selectedSource, setSelectedSource] = useState("");
   const [selectedField, setSelectedField] = useState("");
   const [historyData, setHistoryData] = useState<HistoryRow[]>([]);
@@ -232,6 +233,26 @@ export default function DeviceDetail({
   const sessionCount = activeSessions.length + (
     localSessionActive ? 1 : 0
   );
+
+  // Probes the router itself instead of only re-reading its stored status, so
+  // an operator does not have to wait out the heartbeat interval to see that a
+  // device has come back. Deliberately bound to the button alone and never to
+  // the 30s poll below - and never to the device *list* refresh, where it would
+  // fan out to every row on the page.
+  const handleRefresh = async () => {
+    setProbing(true);
+    try {
+      if (canOperate && !device.revoked) {
+        // Best effort: an older agent never answers, and a failed probe must
+        // not stop the reload the operator actually asked for.
+        await api(`devices/${device.id}/ping`, "POST").catch(() => undefined);
+      }
+      await loadSnapshots();
+      onRefreshDevice();
+    } finally {
+      setProbing(false);
+    }
+  };
 
   const loadSnapshots = async () => {
     setLoadingSnapshots(true);
@@ -384,7 +405,7 @@ export default function DeviceDetail({
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]"><span className={cn("inline-flex items-center gap-1.5 font-medium", device.status === "ONLINE" ? "text-ok" : device.status === "OFFLINE" ? "text-down" : "text-neutral2")}><span className="size-1.5 rounded-full bg-current" />{statusLabel(device.status)}</span><span className="text-muted-foreground">Last contact <span className="font-mono text-foreground/75">{device.last_seen ? relativeTime(device.last_seen) : "Never"}</span></span><span className="text-muted-foreground">{device.active_alerts ? `${device.active_alerts} open alert${device.active_alerts === 1 ? "" : "s"}` : "No open alerts"}</span></div>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2"><Button size="sm" onClick={() => void handleOpenRemote("SSH_LUCI")} disabled={!canOperate || device.status !== "ONLINE" || sessionLoading}><Globe2 />Open LuCI</Button><Button variant="outline" size="sm" onClick={() => void handleOpenRemote("TERMINAL_SSH")} disabled={!canOperate || device.status !== "ONLINE" || sessionLoading}><Code2 />Open terminal</Button><Button variant="outline" size="sm" onClick={() => { void loadSnapshots(); onRefreshDevice(); }} disabled={loadingSnapshots}><RefreshCw className={cn(loadingSnapshots && "animate-spin")} />Refresh</Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" className="size-8" aria-label="Device actions"><Ellipsis /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="min-w-[180px]">{canAdmin && <DropdownMenuItem onSelect={() => setTagEditorOpen(true)}>Edit tags…</DropdownMenuItem>}{isSuperAdmin && !device.revoked && <><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" onSelect={() => setRevokeOpen(true)}>Revoke access…</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu></div>
+        <div className="flex flex-wrap items-center gap-2"><Button size="sm" onClick={() => void handleOpenRemote("SSH_LUCI")} disabled={!canOperate || device.status !== "ONLINE" || sessionLoading}><Globe2 />Open LuCI</Button><Button variant="outline" size="sm" onClick={() => void handleOpenRemote("TERMINAL_SSH")} disabled={!canOperate || device.status !== "ONLINE" || sessionLoading}><Code2 />Open terminal</Button><Button variant="outline" size="sm" onClick={() => void handleRefresh()} disabled={loadingSnapshots || probing}><RefreshCw className={cn((loadingSnapshots || probing) && "animate-spin")} />Refresh</Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" className="size-8" aria-label="Device actions"><Ellipsis /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="min-w-[180px]">{canAdmin && <DropdownMenuItem onSelect={() => setTagEditorOpen(true)}>Edit tags…</DropdownMenuItem>}{isSuperAdmin && !device.revoked && <><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" onSelect={() => setRevokeOpen(true)}>Revoke access…</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu></div>
       </section>
 
       {(displayedSessionId || sessionNotice?.sessionId) && (displayedExpiresAt || sessionNotice?.sessionId) && <div className="flex flex-wrap items-center gap-3 border-b border-ok-border bg-session-ok-bg px-6 py-2.5 text-[13px] text-ok"><span className="size-1.5 rounded-full bg-ok" /><span>{displayedProtocol === "TERMINAL_SSH" ? "Terminal" : "LuCI"} session active{displayedSessionId ? ` · ${displayedSessionId.slice(0, 10)}…` : ""}{displayedExpiresAt ? <> · expires <span className="font-mono">{new Date(displayedExpiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></> : null}</span><div className="ml-auto flex flex-wrap gap-2">{sessionNotice?.launchUrl && <Button variant="outline" size="sm" className="h-7 border-ok-border bg-card" onClick={() => window.open(sessionNotice.launchUrl, "_blank")}><ExternalLink className="size-3.5" />Reopen tab</Button>}{displayedSessionId && <Button variant="outline" size="sm" className="h-7 border-ok-border bg-card" onClick={() => void extendSession(displayedSessionId)} disabled={sessionActionId === displayedSessionId}>Extend 15 min</Button>}{displayedSessionId && <Button variant="outline" size="sm" className="h-7 border-ok-border bg-card" onClick={() => void closeSession(displayedSessionId)}><XCircle className="size-3.5" />Close</Button>}</div></div>}

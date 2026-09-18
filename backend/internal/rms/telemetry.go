@@ -312,6 +312,24 @@ func (s *Core) Ingest(identity string, b []byte, now time.Time) error {
 	if e != nil {
 		return e
 	}
+	// A snapshot arriving over the device's authenticated MQTT session proves
+	// the router is reachable right now - including a backlog replay whose
+	// sequence is discarded below, and a snapshot rejected further down for
+	// naming a profile this device no longer has. Heartbeats are QoS 0 and can
+	// be dropped silently, so without this a router streaming telemetry every
+	// minute could still be reported OFFLINE.
+	//
+	// Kept outside the transaction below on purpose: that transaction takes
+	// FOR SHARE on this same row, and upgrading a shared lock to exclusive
+	// deadlocks as soon as two snapshots for one device overlap. They do not
+	// overlap today only because the MQTT workers shard by device, which is an
+	// invariant this function should not silently depend on.
+	//
+	// presence_hours is deliberately left alone: availability.heartbeat_coverage
+	// must keep meaning heartbeat coverage.
+	if _, e = s.DB.Exec("UPDATE devices SET last_seen=greatest(last_seen,$2) WHERE id=$1 AND NOT revoked", identity, now); e != nil {
+		return e
+	}
 	tx, e := s.DB.Begin()
 	if e != nil {
 		return e
