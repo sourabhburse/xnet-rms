@@ -36,65 +36,105 @@ type Pair struct {
 	responses           chan []byte
 	done                chan struct{}
 	once                sync.Once
-	sshOnce             sync.Once
+	sshSetupMu          sync.Mutex
 	sshClient           *ssh.Client
 	sshTransport        *http.Transport
 	sshErr              error
+	sshErrAt            time.Time
+	closed              bool
 	initial             []byte
 	routerIn            *io.PipeReader
 	routerOut           *io.PipeWriter
 }
 
+// A failed handshake (e.g. dropbear not up yet when LuCI is first requested)
+// used to be cached forever by a sync.Once, permanently breaking the rest of
+// the session. This retries after a short cooldown instead, so a router that
+// becomes reachable moments later doesn't need the whole session reopened.
+const luciSSHRetryCooldown = 5 * time.Second
+
 func (g *Gateway) ensureLuciSSH(p *Pair) error {
-	p.sshOnce.Do(func() {
-		signer, err := ssh.ParsePrivateKey([]byte(p.session.SSHPrivateKey))
-		if err != nil {
-			p.sshErr = err
-			return
-		}
-		pr, pw := io.Pipe()
-		p.mu.Lock()
-		initial := p.initial
-		p.initial = nil
-		p.routerIn, p.routerOut = pr, pw
+	p.sshSetupMu.Lock()
+	defer p.sshSetupMu.Unlock()
+
+	p.mu.Lock()
+	if p.closed {
 		p.mu.Unlock()
-		conn := &wsNetConn{r: io.MultiReader(bytes.NewReader(initial), pr), p: p}
-		cfg := &ssh.ClientConfig{
-			User:            "root",
-			Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			HostKeyAlgorithms: []string{
-				ssh.KeyAlgoRSA,
-				ssh.KeyAlgoRSASHA256,
-				ssh.KeyAlgoRSASHA512,
-				ssh.KeyAlgoED25519,
-			},
-			Timeout: 10 * time.Second,
-		}
-		ncc, chans, reqs, err := ssh.NewClientConn(conn, "127.0.0.1:22", cfg)
-		if err != nil {
-			p.sshErr = err
-			return
-		}
-		client := ssh.NewClient(ncc, chans, reqs)
-		transport := &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return client.Dial("tcp", "127.0.0.1:80")
-			},
-			// The OpenWrt uhttpd configuration on the XE33 2S allows three
-			// concurrent requests (max_requests=3).  Letting the browser open
-			// eight SSH direct-tcpip channels at once makes uhttpd reject one of
-			// LuCI's module requests, leaving the page stuck while collecting data.
-			MaxConnsPerHost:     3,
-			MaxIdleConns:        3,
-			MaxIdleConnsPerHost: 3,
-			IdleConnTimeout:     30 * time.Second,
-		}
-		p.mu.Lock()
-		p.sshClient, p.sshTransport = client, transport
+		return errors.New("session closed")
+	}
+	if p.sshClient != nil {
 		p.mu.Unlock()
-	})
-	return p.sshErr
+		return nil
+	}
+	if p.sshErr != nil && time.Since(p.sshErrAt) < luciSSHRetryCooldown {
+		err := p.sshErr
+		p.mu.Unlock()
+		return err
+	}
+	p.mu.Unlock()
+
+	signer, err := ssh.ParsePrivateKey([]byte(p.session.SSHPrivateKey))
+	if err != nil {
+		p.mu.Lock()
+		p.sshErr, p.sshErrAt = err, time.Now()
+		p.mu.Unlock()
+		return err
+	}
+	pr, pw := io.Pipe()
+	p.mu.Lock()
+	initial := p.initial
+	p.initial = nil
+	prevIn, prevOut := p.routerIn, p.routerOut
+	p.routerIn, p.routerOut = pr, pw
+	p.mu.Unlock()
+	// A prior failed attempt may have left a pipe nobody reads from; close it
+	// so any goroutine still writing router bytes into it unblocks instead of
+	// hanging, rather than silently stalling the router connection.
+	if prevOut != nil {
+		prevOut.Close()
+	}
+	if prevIn != nil {
+		prevIn.Close()
+	}
+	conn := &wsNetConn{r: io.MultiReader(bytes.NewReader(initial), pr), p: p}
+	cfg := &ssh.ClientConfig{
+		User:            "root",
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyAlgorithms: []string{
+			ssh.KeyAlgoRSA,
+			ssh.KeyAlgoRSASHA256,
+			ssh.KeyAlgoRSASHA512,
+			ssh.KeyAlgoED25519,
+		},
+		Timeout: 10 * time.Second,
+	}
+	ncc, chans, reqs, err := ssh.NewClientConn(conn, "127.0.0.1:22", cfg)
+	if err != nil {
+		p.mu.Lock()
+		p.sshErr, p.sshErrAt = err, time.Now()
+		p.mu.Unlock()
+		return err
+	}
+	client := ssh.NewClient(ncc, chans, reqs)
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return client.Dial("tcp", "127.0.0.1:80")
+		},
+		// The OpenWrt uhttpd configuration on the XE33 2S allows three
+		// concurrent requests (max_requests=3). Letting the browser open
+		// more SSH direct-tcpip channels at once makes uhttpd reject one of
+		// LuCI's module requests, leaving the page stuck while collecting data.
+		MaxConnsPerHost:     3,
+		MaxIdleConns:        3,
+		MaxIdleConnsPerHost: 3,
+		IdleConnTimeout:     30 * time.Second,
+	}
+	p.mu.Lock()
+	p.sshClient, p.sshTransport = client, transport
+	p.sshErr = nil
+	p.mu.Unlock()
+	return nil
 }
 
 func isLuciStatic(path string) bool {
@@ -296,7 +336,15 @@ func forwardLuciRequestHeaders(src http.Header) http.Header {
 		kept := make([]string, 0, 2)
 		for _, part := range strings.Split(cookie, ";") {
 			part = strings.TrimSpace(part)
-			if part == "" || strings.HasPrefix(part, "__Host-rms_session=") {
+			if part == "" {
+				continue
+			}
+			// Parse the name the same way net/http's cookie parser does
+			// (split on '=', trim the name) so a differently-whitespaced but
+			// equivalent cookie can't slip past this filter and reach the
+			// router - a raw prefix match against the untrimmed pair can.
+			name, _, _ := strings.Cut(part, "=")
+			if strings.TrimSpace(name) == "__Host-rms_session" {
 				continue
 			}
 			kept = append(kept, part)
@@ -439,24 +487,43 @@ func (g *Gateway) close(id string, p *Pair) {
 	p.once.Do(func() {
 		log.Printf("rms tunnel session %s closing", id)
 		close(p.done)
+		// Serialize teardown with LuCI SSH setup. Otherwise teardown can see a
+		// nil client just before NewClientConn succeeds, then the setup path
+		// stores a live client on an already-closed pair and leaks it.
 		p.mu.Lock()
-		if p.sshTransport != nil {
-			p.sshTransport.CloseIdleConnections()
-		}
-		if p.sshClient != nil {
-			p.sshClient.Close()
-		}
-		if p.routerOut != nil {
-			p.routerOut.Close()
-		}
-		if p.routerIn != nil {
-			p.routerIn.Close()
-		}
-		if p.browser != nil {
-			p.browser.Close()
-		}
+		p.closed = true
+		router := p.router
 		p.mu.Unlock()
-		p.router.Close()
+		// Closing the WebSocket first also aborts an SSH handshake currently
+		// blocked on the router stream, so teardown does not wait for its timeout.
+		if router != nil {
+			_ = router.Close()
+		}
+		p.sshSetupMu.Lock()
+		p.mu.Lock()
+		transport, client := p.sshTransport, p.sshClient
+		routerOut, routerIn := p.routerOut, p.routerIn
+		browser := p.browser
+		p.sshTransport, p.sshClient = nil, nil
+		p.routerOut, p.routerIn = nil, nil
+		p.browser = nil
+		p.mu.Unlock()
+		p.sshSetupMu.Unlock()
+		if transport != nil {
+			transport.CloseIdleConnections()
+		}
+		if client != nil {
+			_ = client.Close()
+		}
+		if routerOut != nil {
+			_ = routerOut.Close()
+		}
+		if routerIn != nil {
+			_ = routerIn.Close()
+		}
+		if browser != nil {
+			_ = browser.Close()
+		}
 		g.mu.Lock()
 		delete(g.pairs, id)
 		g.mu.Unlock()
@@ -472,10 +539,10 @@ func terminalPage(data []byte, session Session) []byte {
 	}
 	page := string(data)
 	for placeholder, value := range map[string]string{
-		"__XNET_DEVICE_NAME__":         deviceName,
-		"__XNET_DEVICE_SERIAL__":       session.DeviceSerial,
-		"__XNET_DEVICE_MODEL__":        session.DeviceModel,
-		"__XNET_DEVICE_FIRMWARE__":     session.DeviceFirmware,
+		"__XNET_DEVICE_NAME__":        deviceName,
+		"__XNET_DEVICE_SERIAL__":      session.DeviceSerial,
+		"__XNET_DEVICE_MODEL__":       session.DeviceModel,
+		"__XNET_DEVICE_FIRMWARE__":    session.DeviceFirmware,
 		"__XNET_SESSION_EXPIRES_AT__": session.ExpiresAt.Format(time.RFC3339Nano),
 	} {
 		page = strings.ReplaceAll(page, placeholder, html.EscapeString(value))
@@ -737,7 +804,16 @@ func (g *Gateway) router(w http.ResponseWriter, r *http.Request) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if _, ok := g.pairs[id]; ok || len(g.pairs) >= 25 {
+	// Scoped to the requesting org's own pairs so one busy tenant can't
+	// exhaust a platform-wide cap and lock every other tenant out. Keep the
+	// global cap as a separate resource-safety bound.
+	orgActive := 0
+	for _, existing := range g.pairs {
+		if existing.session.OrganizationID == session.OrganizationID {
+			orgActive++
+		}
+	}
+	if _, ok := g.pairs[id]; ok || len(g.pairs) >= maxActiveSessions || orgActive >= maxActiveSessionsPerOrg {
 		fail(w, 409, "router already connected or capacity reached")
 		return
 	}

@@ -28,7 +28,7 @@ static int check(int event, void *data, void *unused) {
     if (strncmp(e->topic,prefix,strlen(prefix))) return MOSQ_ERR_ACL_DENIED;
     const char *leaf=e->topic+strlen(prefix);
     if (e->access == MOSQ_ACL_WRITE && !e->retain && e->payloadlen<=65536 &&
-        (!strcmp(leaf,"snapshots") || !strcmp(leaf,"heartbeat"))) return MOSQ_ERR_SUCCESS;
+        (!strcmp(leaf,"snapshots") || !strcmp(leaf,"heartbeat") || !strcmp(leaf,"previews"))) return MOSQ_ERR_SUCCESS;
     if ((e->access == MOSQ_ACL_READ || e->access == MOSQ_ACL_SUBSCRIBE) &&
         (!strcmp(leaf,"acks") || !strcmp(leaf,"commands"))) return MOSQ_ERR_SUCCESS;
     return MOSQ_ERR_ACL_DENIED;

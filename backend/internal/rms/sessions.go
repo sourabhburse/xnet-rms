@@ -27,12 +27,18 @@ type Session struct {
 	BrowserHash   string     `json:"browser_hash,omitempty"`
 	SSHPrivateKey string     `json:"ssh_private_key,omitempty"`
 	SSHSigner     ssh.Signer `json:"-"`
+	OrganizationID string     `json:"organization_id"`
 }
 
 const (
 	initialSessionTTL  = 15 * time.Minute
 	sessionExtension   = 15 * time.Minute
 	maxSessionLifetime = 60 * time.Minute
+	maxActiveSessions  = 25
+	// Strictly below maxActiveSessions, otherwise the per-organization check
+	// is unreachable: the org count is a subset of the global count, so it can
+	// only reach the global ceiling at the same moment the global check fires.
+	maxActiveSessionsPerOrg = 10
 )
 
 func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
@@ -96,17 +102,25 @@ func (s *Core) createSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "sessions unavailable")
 		return
 	}
-	var active int
-	e = tx.QueryRow("SELECT count(*) FROM sessions WHERE closed_at IS NULL").Scan(&active)
-	if e != nil || active >= 25 {
-		fail(w, 429, "session capacity reached")
-		return
-	}
 	var org string
 	var online bool
 	e = tx.QueryRow("SELECT organization_id,last_seen>now()-interval '180 seconds' AND NOT revoked FROM devices WHERE id=$1 FOR SHARE", req.DeviceID).Scan(&org, &online)
 	if e != nil || !online {
 		fail(w, 409, "device unavailable")
+		return
+	}
+	// Enforce both the per-organization quota and the global resource cap so
+	// one busy tenant cannot exhaust the platform-wide session capacity.
+	var activeGlobal, activeOrg int
+	e = tx.QueryRow(`SELECT count(*),count(*) FILTER (WHERE d.organization_id=$1)
+		FROM sessions s JOIN devices d ON d.id=s.device_id
+		WHERE s.closed_at IS NULL`, org).Scan(&activeGlobal, &activeOrg)
+	if e != nil {
+		fail(w, 503, "sessions unavailable")
+		return
+	}
+	if activeGlobal >= maxActiveSessions || activeOrg >= maxActiveSessionsPerOrg {
+		fail(w, 429, "session capacity reached")
 		return
 	}
 	_, e = tx.Exec("INSERT INTO sessions(id,device_id,user_id,protocol,ticket_hash,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, req.DeviceID, a.ID, req.Protocol, digest(ticket), expires)
@@ -385,7 +399,7 @@ func (s *Core) internalSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var x Session
-	e := s.DB.QueryRow(`SELECT s.id,s.device_id,d.name,d.serial_number,d.model,d.firmware_version,s.user_id,s.protocol,s.expires_at,s.browser_hash FROM sessions s JOIN devices d ON d.id=s.device_id JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.closed_at IS NULL AND s.expires_at>now() AND NOT d.revoked AND NOT u.disabled AND u.role IN ('SUPER_ADMIN','ORG_ADMIN','OPERATOR') AND (u.role='SUPER_ADMIN' OR u.organization_id=d.organization_id)`, r.PathValue("id")).Scan(&x.ID, &x.DeviceID, &x.DeviceName, &x.DeviceSerial, &x.DeviceModel, &x.DeviceFirmware, &x.UserID, &x.Protocol, &x.ExpiresAt, &x.BrowserHash)
+	e := s.DB.QueryRow(`SELECT s.id,s.device_id,d.name,d.serial_number,d.model,d.firmware_version,s.user_id,s.protocol,s.expires_at,s.browser_hash,d.organization_id FROM sessions s JOIN devices d ON d.id=s.device_id JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.closed_at IS NULL AND s.expires_at>now() AND NOT d.revoked AND NOT u.disabled AND u.role IN ('SUPER_ADMIN','ORG_ADMIN','OPERATOR') AND (u.role='SUPER_ADMIN' OR u.organization_id=d.organization_id)`, r.PathValue("id")).Scan(&x.ID, &x.DeviceID, &x.DeviceName, &x.DeviceSerial, &x.DeviceModel, &x.DeviceFirmware, &x.UserID, &x.Protocol, &x.ExpiresAt, &x.BrowserHash, &x.OrganizationID)
 	if e != nil {
 		fail(w, 403, "session inactive")
 		return

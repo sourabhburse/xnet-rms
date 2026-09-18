@@ -195,6 +195,7 @@ func (s *Core) Maintain(ctx context.Context) {
 				}
 			}
 			s.DB.Exec("DELETE FROM recovery_challenges WHERE expires_at<now()")
+			s.sweepPreviews()
 			if e := s.expireSessions(); e != nil {
 				log.Printf("session expiry: %v", e)
 			}
